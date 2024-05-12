@@ -1,0 +1,3530 @@
+---
+title: "Cross Border Spillovers"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Loading Required Packages
+
+```{r}
+library(ConnectednessApproach)
+library(dplyr)
+library(extrafont)
+library(forecast)
+library(ggplot2)
+library(gridExtra)
+library(kableExtra)
+library(knitr)
+library(lubridate)
+library(moments)
+library(patchwork)
+library(plm)
+library(RColorBrewer)
+library(readr)
+library(readxl)
+library(reshape2)
+library(stargazer)
+library(tibble)
+library(tidyr)
+library(tidyverse)
+library(tseries)
+library(urca)
+library(vars)
+library(vtable)
+library(openxlsx)
+library(xtable)
+library(zoo)
+```
+
+
+```{r}
+compute_summary <- function(data_column) {
+    data_clean <- na.omit(data_column)
+
+    num_obs <- length(data_clean)
+    mean_val <- mean(data_clean)
+    sd_val <- sd(data_clean)
+    min_val <- min(data_clean)
+    max_val <- max(data_clean)
+    skew_val <- skewness(data_clean)
+    kurt_val <- kurtosis(data_clean)
+    
+    return(c(num_obs, mean_val, sd_val, min_val, max_val, skew_val, kurt_val))
+}
+```
+
+```{r}
+perform_adf_tests_forecast <- function(column_data) {
+    data_clean <- na.omit(column_data)
+
+    adf_none <- ur.df(data_clean, type = "none")
+    adf_none_stat <- adf_none@teststat[1]
+
+    adf_drift <- ur.df(data_clean, type = "drift")
+    adf_drift_stat <- adf_drift@teststat[1]
+
+    adf_trend <- ur.df(data_clean, type = "trend")
+    adf_trend_stat <- adf_trend@teststat[1]
+
+    adf_none_p <- pnorm(-abs(adf_none_stat))
+    adf_drift_p <- pnorm(-abs(adf_drift_stat))
+    adf_trend_p <- pnorm(-abs(adf_trend_stat))
+
+    return(c(adf_none_stat, adf_none_p, adf_drift_stat, adf_drift_p, adf_trend_stat, adf_trend_p))
+}
+```
+
+
+
+# US Cross-Asset Spillovers
+
+## Loading Data
+
+```{r}
+data <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/logvol.xlsx")
+#ordering by date + making excel the zoo
+logvol <- zoo(data[, -1], order.by = as.Date(data$Date))
+#this code removes any observations before 2001-11-15 (where I am missing observations for some time series)
+#logvol <- logvol[index(logvol) >= as.Date("2001-11-15")]
+#this line fills the missing observations with last observation carried forward.
+logvol <- na.locf(logvol)
+logvol_df <- as.data.frame(logvol)
+logvol_df$Date <- index(logvol)
+logvol_df <- logvol_df[, c(ncol(logvol_df), 1:(ncol(logvol_df)-1))]
+write.xlsx(logvol_df, file = "/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/logvol2.xlsx")
+
+
+
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(logvol_df)[sapply(logvol_df, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(logvol_df[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+# Convert numeric columns to numeric data types
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+
+# Set column names
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results for All Variables",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+```{r}
+#for ordinary volatility
+data2 <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/justvolatility.xlsx")
+#ordering by date + making excel the zoo
+voldf <- zoo(data2[, -1], order.by = as.Date(data2$Date))
+#this code removes any observations before 2001-11-15 (where I am missing observations for some time series)
+voldf <- voldf[index(voldf) >= as.Date("2005-07-07")]
+#this line fills the missing observations with last observation carried forward
+voldf <- na.locf(voldf)
+vol_df <- as.data.frame(voldf)
+vol_df$Date <- index(voldf)
+vol_df <- vol_df[, c(ncol(vol_df), 1:(ncol(vol_df)-1))]
+write.xlsx(vol_df, file = "/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/voldf.xlsx")
+
+
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(vol_df)[sapply(vol_df, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(vol_df[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+# Convert numeric columns to numeric data types
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+
+# Set column names
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results for All Variables",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+```{r}
+#creating a long for ggplot
+logvol_long <- pivot_longer(logvol_df, cols = c(US, UK, JAPAN, GERMANY, FRANCE, AUSTRALIA, MEXICO), 
+                            names_to = "Variable", values_to = "LogVol")
+logvol_long$Variable <- factor(logvol_long$Variable,
+                               levels = c("US", "UK", "JAPAN", "GERMANY", "FRANCE", "AUSTRALIA", "MEXICO"),
+                               labels = c("US", "UK", "JAPAN", "GERMANY", "FRANCE", "AUSTRALIA", "MEXICO"))
+
+```
+
+```{r}
+#creating a long for ggplot for ordinary volatility
+vol_long <- pivot_longer(vol_df, cols = c(US_vol, UK_vol, JAPAN_vol, GERMANY_vol, FRANCE_vol, AUSTRALIA_vol, MEXICO_vol), 
+                            names_to = "Variable", values_to = "Vol")
+vol_long$Variable <- factor(vol_long$Variable,
+                               levels = c("US_vol", "UK_vol", "JAPAN_vol", "GERMANY_vol", "FRANCE_vol", "AUSTRALIA_vol", "MEXICO_vol"),
+                               labels = c("US", "UK", "JAPAN", "GERMANY", "FRANCE", "AUSTRALIA", "MEXICO"))
+
+```
+
+## Summary Statistics
+
+```{r}
+summary <- SummaryStatistics(logvol)
+summary
+```
+
+```{r}
+summary <- SummaryStatistics(voldf)
+summary
+```
+
+
+
+```{r}
+#stargazer(summary, type = "text")
+```
+
+```{r}
+#summaryvol <- SummaryStatistics(voldf)
+#summaryvol
+#stargazer(summaryvol, type = "text")
+```
+
+```{r}
+stargazer(vol_df, type = "latex", summary = TRUE, digits = 10)
+```
+
+```{r}
+USskewness <- skewness(vol_df$US_vol)
+UKskewness <- skewness(vol_df$UK_vol)
+JAPANskewness <- skewness(vol_df$JAPAN_vol)
+GERMANYskewness <- skewness(vol_df$GERMANY_vol)
+FRANCEskewness <- skewness(vol_df$FRANCE_vol)
+AUSTRALIAskewness <- skewness(vol_df$AUSTRALIA_vol)
+MEXICOskewness <- skewness(vol_df$MEXICO_vol)
+
+
+print(USskewness)
+print(UKskewness)
+print(JAPANskewness)
+print(GERMANYskewness)
+print(FRANCEskewness)
+print(AUSTRALIAskewness)
+print(MEXICOskewness)
+```
+
+```{r}
+USkurtosis <- kurtosis(vol_df$US_vol)
+UKkurtosis <- kurtosis(vol_df$UK_vol)
+JAPANkurtosis <- kurtosis(vol_df$JAPAN_vol)
+GERMANYkurtosis <- kurtosis(vol_df$GERMANY_vol)
+FRANCEkurtosis <- kurtosis(vol_df$FRANCE_vol)
+AUSTRALIAkurtosis <- kurtosis(vol_df$AUSTRALIA_vol)
+MEXICOkurtosis <- kurtosis(vol_df$MEXICO_vol)
+
+
+print(USkurtosis)
+print(UKkurtosis)
+print(JAPANkurtosis)
+print(GERMANYkurtosis)
+print(FRANCEkurtosis)
+print(AUSTRALIAkurtosis)
+print(MEXICOkurtosis)
+```
+
+
+```{r}
+relevant_columns <- colnames(vol_df)[2:length(colnames(vol_df))]
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(vol_df[[col]])))
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("N", "Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE)
+```
+
+```{r}
+relevant_columns <- colnames(logvol_df)[2:length(colnames(logvol_df))]
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(logvol_df[[col]])))
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("N", "Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE)
+```
+
+
+## Correlation Matrix
+
+```{r}
+logvol2 <- logvol
+new_names <- c("US", "UK", "JAPAN", "GERMANY", "FRANCE", "AUSTRALIA", "MEXICO")
+colnames(logvol2) <- new_names
+logvolcor = cor(logvol2)
+print(logvolcor)
+```
+
+```{r}
+
+logvolcor_long <- reshape2::melt(logvolcor)
+heatmaplogvol <- ggplot(logvolcor_long, aes(Var1, Var2, fill = value)) +
+  geom_tile() + 
+  geom_text(aes(label = sprintf("%.2f", value)), size = 5, color = "black", family = "Times New Roman") + 
+  scale_fill_gradient2(low = "white", high = "red", mid = "yellow", midpoint = 0, limit = c(-1,1), space = "Lab", name="Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, family = "Times New Roman"),
+        axis.text.y = element_text(family = "Times New Roman"),
+        axis.title.x = element_blank(), 
+        axis.title.y = element_blank(),
+        plot.title = element_text(family = "Times New Roman", face = "bold", size = 14, hjust = 0.5)) + 
+  labs(fill = "Correlation") 
+
+print(heatmaplogvol)
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/heatmaplogvol.png", heatmaplogvol, width = 10, height = 8, dpi = 300)
+```
+
+## Plotting the time series
+
+```{r}
+multiplot <- ggplot(logvol_long, aes(x = Date, y = LogVol, color = Variable)) +
+  geom_line(linewidth = 0.3, linetype = 'solid') +
+  xlab("") +
+  theme_bw(base_size = 20) +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 20),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    legend.box = "vertical", # Center the legend
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  ) +
+   scale_color_manual(values = c("US" = "blue", "UK" = "red", "JAPAN" = "green", "GERMANY" = "purple", "FRANCE" = "pink", "AUSTRALIA" = "orange", "MEXICO" = "brown"),
+                     name = "Variable") +
+  labs(y = "Log Volatility", color = "Variable") +
+  ggtitle("Figure : Log Volatility Over Time")
+
+multiplot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/multiplot.png", plot = multiplot, width = 20, height = 15, dpi = 300)
+```
+
+```{r}
+plots <- list()
+variables <- unique(logvol_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = logvol_long[logvol_long$Variable == variables[i], ], aes(x = Date, y = LogVol)) +
+        geom_line(aes(color = Variable), linewidth = 0.1) +
+        scale_color_manual(values = c("US" = "black", "UK" = "black", "JAPAN" = "black", "GERMANY" = "black", "FRANCE" = "black", "AUSTRALIA" = "black", "MEXICO" = "black")) +
+        labs(y = "Log Volatility", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'), 
+            axis.title.y = element_text(size = 7, face = 'bold'), 
+            axis.text = element_text(size = 10),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+#combined_plot <- combined_plot & 
+ #                plot_layout(heights = c(1, 1, 1, 1), widths = c(1, 1))
+
+#combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) / (plots[[5]] | plots[[6]]) / (plots[[7]] | empty_plot) +
+ # plot_annotation(title = "Figure : Log Volatility", theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New #Roman")))
+
+#combined_plot
+
+combined_plot <- (plots[[1]] | plots[[2]]) / 
+                 (plots[[3]] | plots[[4]]) / 
+                 (plots[[5]] | plots[[6]]) / 
+                 (plots[[7]] | plot_spacer()) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+
+
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/logvolatilitytimeseries.png", plot = combined_plot, width = 15, height = 15, dpi = 300)
+
+```
+
+## Just volatilities
+
+```{r}
+vol2 <- voldf
+new_names <- c("US", "UK", "JAPAN", "GERMANY", "FRANCE", "AUSTRALIA", "MEXICO")
+colnames(vol2) <- new_names
+volcor = cor(vol2)
+print(volcor)
+```
+
+```{r}
+
+volcor_long <- reshape2::melt(volcor)
+heatmapvol <- ggplot(volcor_long, aes(Var1, Var2, fill = value)) +
+  geom_tile() + 
+  geom_text(aes(label = sprintf("%.2f", value)), size = 5, color = "black", family = "Times New Roman") + 
+  scale_fill_gradient2(low = "white", high = "red", mid = "yellow", midpoint = 0, limit = c(-1,1), space = "Lab", name="Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, family = "Times New Roman"),
+        axis.text.y = element_text(family = "Times New Roman"),
+        axis.title.x = element_blank(), 
+        axis.title.y = element_blank(),
+        plot.title = element_text(family = "Times New Roman", face = "bold", size = 14, hjust = 0.5)) + 
+  labs(fill = "Correlation") 
+
+print(heatmapvol)
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/volatilityheatmapvol.png", heatmapvol, width = 10, height = 8, dpi = 300)
+```
+
+```{r}
+plots <- list()
+variables <- unique(vol_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = vol_long[vol_long$Variable == variables[i], ], aes(x = Date, y = Vol)) +
+        geom_line(aes(color = Variable), linewidth = 0.1) +
+        scale_color_manual(values = c("US" = "black", "UK" = "black", "JAPAN" = "black", "GERMANY" = "black", "FRANCE" = "black", "AUSTRALIA" = "black", "MEXICO" = "black")) +
+        labs(y = "Volatility", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'), 
+            axis.title.y = element_text(size = 7, face = 'bold'), 
+            axis.text = element_text(size = 10),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+#combined_plot <- combined_plot & 
+ #                plot_layout(heights = c(1, 1, 1, 1), widths = c(1, 1))
+
+#combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) / (plots[[5]] | plots[[6]]) / (plots[[7]] | empty_plot) +
+#plot_annotation(title = "Figure : Log Volatility", theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", #family = "Times New #Roman")))
+
+#combined_plot
+
+combined_plot <- (plots[[1]] | plots[[2]]) / 
+                 (plots[[3]] | plots[[4]]) / 
+                 (plots[[5]] | plots[[6]]) / 
+                 (plots[[7]] | plot_spacer()) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/justvolatilities.png", plot = combined_plot, width = 15, height = 15, dpi = 300)
+
+```
+
+## Renaming the columns
+
+```{r}
+logvol2 <- logvol
+new_names <- c("US", "UK", "JAPAN", "GERMANY", "FRANCE", "AUSTRALIA", "MEXICO")
+colnames(logvol2) <- new_names
+```
+
+## Selection of the order of the VAR model to enable calculation of the spillovers
+
+```{r}
+VARselect(logvol2,
+          lag.max = 15,
+          type = "none")
+```
+
+## Orthogonalised
+
+### Without rolling window
+
+```{r}
+dca = ConnectednessApproach(logvol2, 
+                            nlag=4, 
+                            nfore=10,
+                            corrected=TRUE,
+                            model="VAR",
+                            connectedness="Time",
+                            Connectedness_config=list(TimeConnectedness=list(generalized=FALSE)))
+```
+
+```{r}
+kable(dca$TABLE)
+```
+
+### with rolling window
+
+```{r}
+dca = ConnectednessApproach(logvol2, 
+                            nlag=4, 
+                            nfore=10,
+                            corrected=TRUE,
+                            window.size=200,
+                            model="VAR",
+                            connectedness="Time",
+                            Connectedness_config=list(TimeConnectedness=list(generalized=FALSE)))
+```
+
+```{r}
+kable(dca$TABLE)
+```
+
+## Generalised
+
+### Estimating the model WITHOUT the rolling window
+
+```{r}
+dca = ConnectednessApproach(logvol2, 
+                            nlag=4, 
+                            nfore=10,
+                            corrected=TRUE,
+                            model="VAR",
+                            connectedness="Time",
+                            Connectedness_config=list(TimeConnectedness=list(generalized=TRUE)))
+```
+
+```{r}
+kable(dca$TABLE)
+```
+
+### Now estimating the model with a 200 day rolling window.
+
+```{r}
+dca = ConnectednessApproach(logvol2, 
+                            nlag=4, 
+                            nfore=10,
+                            corrected=TRUE,
+                            window.size=200,
+                            model="VAR",
+                            connectedness="Time",
+                            Connectedness_config=list(TimeConnectedness=list(generalized=TRUE)))
+```
+
+### Spillover summary table
+
+```{r}
+stargazer(dca$TABLE, type = "latex")
+```
+
+## Exporting Spillovers as dataframes
+
+### Exporting the spillovers from 2 dimensional arrays
+
+```{r}
+TCI <- as.data.frame(dca[['TCI']])
+TO <- as.data.frame(dca[['TO']])
+FROM <- as.data.frame(dca[['FROM']])
+```
+
+## Plotting TCI
+
+```{r}
+TCI <- TCI %>% rownames_to_column(var = "Date")
+TCI$Date <- as.Date(TCI$Date)
+```
+
+```{r}
+tci_plot <- ggplot(data = TCI, aes(x = Date, y = TCI)) +
+  geom_line(linewidth = 0.3, color = "black") +
+  labs(y = "Total Connectedness Index", title = "Figure : Dynamic Total Connectedness") +
+  theme_bw(base_size = 20) + 
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 5),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(tci_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/TCI.png", plot = tci_plot, width = 15, height = 10, dpi = 300)
+
+```
+
+## Plotting TO
+
+```{r}
+TO <- TO %>% rownames_to_column(var = "Date")
+TO$Date <- as.Date(TO$Date)
+
+to_long <- pivot_longer(TO, cols = c("US", "UK", "JAPAN", "GERMANY", "FRANCE", "AUSTRALIA", "MEXICO"), 
+                            names_to = "Variable", values_to = "TO")
+```
+
+```{r}
+plots <- list()
+variables <- unique(to_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = to_long[to_long$Variable == variables[i], ], aes(x = Date, y = TO)) +
+        geom_line(color = 'black', linewidth = 0.1) +
+        labs(y = "TO", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'),
+            axis.title.y = element_text(size = 7, face = 'bold'),
+            axis.text = element_text(size = 5),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+#combined_plot <- combined_plot & 
+    #             plot_layout(heights = c(1, 1, 1, 1), widths = c(1, 1))
+empty_plot <- ggplot() +
+    theme_void() +
+    theme(
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()
+    ) +
+    labs(title = " ")
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) / (plots[[5]] | plots[[6]]) / (plots[[7]] | empty_plot) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/to.png", plot = combined_plot, width = 15, height = 15, dpi = 300)
+```
+
+## Plotting FROM
+
+```{r}
+FROM <- FROM %>% rownames_to_column(var = "Date")
+FROM$Date <- as.Date(FROM$Date)
+
+from_long <- pivot_longer(FROM, cols = c("US", "UK", "JAPAN", "GERMANY", "FRANCE", "AUSTRALIA", "MEXICO"), 
+                            names_to = "Variable", values_to = "FROM")
+```
+
+```{r}
+plots <- list()
+variables <- unique(from_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = from_long[from_long$Variable == variables[i], ], aes(x = Date, y = FROM)) +
+        geom_line(color = 'black', linewidth = 0.1) +
+        labs(y = "FROM", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'), 
+            axis.title.y = element_text(size = 7, face = 'bold'), 
+            axis.text = element_text(size = 5),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+
+combined_plot <- combined_plot & 
+                 plot_layout(heights = c(1, 1, 1, 1), widths = c(1, 1))
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) / (plots[[5]] | plots[[6]]) / (plots[[7]] | empty_plot) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/from.png", plot = combined_plot, width = 15, height = 15, dpi = 300)
+```
+
+## NPDC
+
+```{r}
+#defining datasaving function from ConnectednessApproach for plotting
+plotNPDC = function(dca, ca=NULL, path=NULL, ylim=c(NULL, NULL), selection=NULL, width=10, height=7, saveData=FALSE, ...) {
+  dataList = list()
+  namesList = list()
+  
+  if (!is.null(path)) {
+    if (!dir.exists(path)) {
+      dir.create(path)
+    }
+  }
+  if (length(ca)>0 && !is.null(ca$config$approach)) {
+    ca = list(ca)
+  }
+  x = dca$NPDC
+  if (is.null(x)) {
+    stop(paste(ca$config$approach, "has no NPDC."))
+  }
+  date = as.Date(dimnames(x)[[3]])
+  t = length(date)
+  k = ncol(x)
+  NAMES = colnames(x)
+  if (is.null(NAMES)) {
+    NAMES = 1:k
+  }
+  lower = ylim[1]
+  upper = ylim[2]
+
+  kk = k*(k-1)/2
+  oldpar = par(no.readonly=TRUE)
+  on.exit(par(oldpar))
+  if (!is.null(path)) pdf(file=paste0(path, "/NPDC.pdf"), width=width, height=height)
+
+  for (j in 1:k) {
+    for (i in 1:k) {
+      if (i > j) {
+        if (i == selection || j == selection || is.null(selection)) {
+          x_ij = x[i, j, ]
+          seriesName = paste(NAMES[j], "-", NAMES[i], sep = "")
+          namesList[[length(namesList) + 1]] = seriesName
+          df = data.frame(Date = date, Y = x_ij)
+          colnames(df)[2] = seriesName
+          dataList[[length(dataList) + 1]] = df
+
+        
+          if (!is.null(ca)) {
+            for (il in 1:length(ca)) {
+              seriesName_ca = paste(seriesName, "_Comparison", il, sep = "")
+              namesList[[length(namesList) + 1]] = seriesName_ca
+              caData = ca[[il]]$NPDC[i, j, ]
+              df_ca = data.frame(Date = date, Y = caData)
+              colnames(df_ca)[2] = seriesName_ca
+              dataList[[length(dataList) + 1]] = df_ca
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!is.null(path)) dev.off()
+
+  if (saveData) {
+    combinedData = Reduce(function(...) merge(..., by = "Date", all = TRUE), dataList)
+    return(combinedData)
+  }
+}
+
+```
+
+```{r}
+NPDC <- plotNPDC(dca, saveData = TRUE)
+#rownames(NPDC) <- NPDC$Date
+#NPDC$Date <- NULL
+```
+
+```{r}
+npdc_long <- pivot_longer(NPDC, cols = c('US-UK', 'US-JAPAN', 'US-GERMANY', 'US-FRANCE', 'US-AUSTRALIA', 'US-MEXICO', 'UK-JAPAN', 'UK-GERMANY', 'UK-FRANCE', 'UK-AUSTRALIA', 'UK-MEXICO', 'JAPAN-GERMANY', 'JAPAN-FRANCE', 'JAPAN-AUSTRALIA', 'JAPAN-MEXICO', 'GERMANY-FRANCE', 'GERMANY-AUSTRALIA', 'GERMANY-MEXICO', 'FRANCE-AUSTRALIA', 'FRANCE-MEXICO', 'AUSTRALIA-MEXICO'), 
+                            names_to = "Variable", values_to = "NPDC")
+
+```
+
+```{r}
+variables <- unique(npdc_long$Variable)
+plots <- list()
+
+for (i in seq_along(variables)) {
+  plots[[i]] <- ggplot(data = npdc_long %>% filter(Variable == variables[i]), aes(x = Date, y = NPDC)) +
+    geom_line(linewidth = 0.1, color = "black") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    scale_color_manual(values = rep("solid", length(variables))) +
+    labs(y = "Net Connectedness", title = variables[i]) +
+    theme_bw(base_size = 20) + 
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7),
+      axis.title.y = element_text(size = 7),
+      axis.text = element_text(size = 5),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+n_cols <- ceiling(sqrt(length(variables)))
+n_rows <- ceiling(length(variables) / n_cols)
+
+combined_plot <- wrap_plots(plots, ncol = n_cols) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/npdc.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+
+## PCI
+
+```{r}
+plotPCI = function(dca, ca=NULL, path=NULL, ylim=c(NULL, NULL), selection=NULL, width=10, height=7, saveData=FALSE, ...) {
+  dataList = list() 
+  namesList = list()
+
+  if (!is.null(path)) {
+    if (!dir.exists(path)) {
+      dir.create(path)
+    }
+  }
+  if (length(ca)>0 && !is.null(ca$config$approach)) {
+    ca = list(ca)
+  }
+  x = dca$PCI
+  if (is.null(x)) {
+    stop(paste(dca$config$approach, "has no PCI."))
+  }
+  date = as.Date(dimnames(x)[[3]])
+  t = length(date)
+  k = ncol(x)
+  NAMES = colnames(x)
+  if (is.null(NAMES)) {
+    NAMES = 1:k
+  }
+  lower = ylim[1]
+  upper = ylim[2]
+
+  x[which(x >= 99.99999, arr.ind = TRUE)] = 0
+
+  if (!is.null(path)) pdf(file=paste0(path, "/PCI.pdf"), width=width, height=height)
+
+  for (j in 1:k) {
+    for (i in 1:k) {
+      if (i > j) {
+        if (i == selection || j == selection || is.null(selection)) {
+          x_ij = x[i, j, ]
+          seriesName = paste(NAMES[j], "-", NAMES[i], sep = "")
+          namesList[[length(namesList) + 1]] = seriesName
+          df = data.frame(Date = date, Y = x_ij)
+          colnames(df)[2] = seriesName
+          dataList[[length(dataList) + 1]] = df
+
+          if (!is.null(ca)) {
+            for (il in 1:length(ca)) {
+              seriesName_ca = paste(seriesName, "_Comparison", il, sep = "")
+              namesList[[length(namesList) + 1]] = seriesName_ca
+              caData = ca[[il]]$PCI[i, j, ]
+              df_ca = data.frame(Date = date, Y = caData)
+              colnames(df_ca)[2] = seriesName_ca
+              dataList[[length(dataList) + 1]] = df_ca
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!is.null(path)) dev.off()
+
+  if (saveData) {
+    combinedData = Reduce(function(...) merge(..., by = "Date", all = TRUE), dataList)
+    return(combinedData)
+  }
+}
+
+```
+
+```{r}
+PCI <- plotPCI(dca, saveData = TRUE)
+#rownames(PCI) <- PCI$Date
+#PCI$Date <- NULL
+```
+
+```{r}
+pci_long <- pivot_longer(PCI, cols = c('US-UK', 'US-JAPAN', 'US-GERMANY', 'US-FRANCE', 'US-AUSTRALIA', 'US-MEXICO', 'UK-JAPAN', 'UK-GERMANY', 'UK-FRANCE', 'UK-AUSTRALIA', 'UK-MEXICO', 'JAPAN-GERMANY', 'JAPAN-FRANCE', 'JAPAN-AUSTRALIA', 'JAPAN-MEXICO', 'GERMANY-FRANCE', 'GERMANY-AUSTRALIA', 'GERMANY-MEXICO', 'FRANCE-AUSTRALIA', 'FRANCE-MEXICO', 'AUSTRALIA-MEXICO'), 
+                            names_to = "Variable", values_to = "PCI")
+```
+
+```{r}
+variables <- unique(pci_long$Variable)
+plots <- list()
+
+for (i in seq_along(variables)) {
+  plots[[i]] <- ggplot(data = pci_long %>% filter(Variable == variables[i]), aes(x = Date, y = PCI)) +
+    geom_line(linewidth = 0.1, color = "black") +
+    scale_color_manual(values = rep("solid", length(variables))) +
+    labs(y = "Net Connectedness", title = variables[i]) +
+    theme_bw(base_size = 20) + 
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7),
+      axis.title.y = element_text(size = 7),
+      axis.text = element_text(size = 5),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+n_cols <- ceiling(sqrt(length(variables)))
+n_rows <- ceiling(length(variables) / n_cols)
+
+combined_plot <- wrap_plots(plots, ncol = n_cols) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/PCI.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+
+## Monthly Averages
+
+### TCI
+
+```{r}
+TCIm <- TCI %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+    TCI = mean(TCI, na.rm = TRUE),
+  ) %>%
+  ungroup()
+```
+
+```{r}
+tcim_plot <- ggplot(data = TCIm, aes(x = Date, y = TCI)) +
+  geom_line(linewidth = 0.3, color = "black") +
+  labs(y = "Total Connectedness Index") +
+  theme_bw(base_size = 20) + 
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(tcim_plot)
+print(tci_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/TCIm.png", plot = tcim_plot, width = 15, height = 10, dpi = 300)
+
+```
+
+### TO
+
+```{r}
+TO$Date <- as.Date(TO$Date)
+
+TOm <- TO %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+    US = mean(US, na.rm = TRUE),
+    UK = mean(UK, na.rm = TRUE),
+    JAPAN = mean(JAPAN, na.rm = TRUE),
+    GERMANY = mean(GERMANY, na.rm = TRUE),
+    FRANCE = mean(FRANCE, na.rm = TRUE),
+    AUSTRALIA = mean(AUSTRALIA, na.rm = TRUE),
+    MEXICO = mean(MEXICO, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+```
+
+```{r}
+#TOm <- TO %>% rownames_to_column(var = "Date")
+TOm$Date <- as.Date(TOm$Date)
+
+tom_long <- pivot_longer(TOm, cols = c("US", "UK", "JAPAN", "GERMANY", "FRANCE", "AUSTRALIA", "MEXICO"), 
+                            names_to = "Variable", values_to = "TO")
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(TOm)[sapply(TOm, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(TOm[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+# Convert numeric columns to numeric data types
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+
+# Set column names
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results for All Variables",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+
+```{r}
+plots <- list()
+variables <- unique(tom_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = tom_long[tom_long$Variable == variables[i], ], aes(x = Date, y = TO)) +
+        geom_line(color = 'black', linewidth = 0.1) +
+        labs(y = "TO", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'),
+            axis.title.y = element_text(size = 7, face = 'bold'),
+            axis.text = element_text(size = 10),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+#combined_plot <- combined_plot & 
+    #             plot_layout(heights = c(1, 1, 1, 1), widths = c(1, 1))
+empty_plot <- ggplot() +
+    theme_void() +
+    theme(
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()
+    ) +
+    labs(title = " ")
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) / (plots[[5]] | plots[[6]]) / (plots[[7]] | empty_plot) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/tom.png", plot = combined_plot, width = 15, height = 15, dpi = 300)
+```
+
+
+
+### FROM
+
+```{r}
+FROMm <- FROM %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+     US = mean(US, na.rm = TRUE),
+    UK = mean(UK, na.rm = TRUE),
+    JAPAN = mean(JAPAN, na.rm = TRUE),
+    GERMANY = mean(GERMANY, na.rm = TRUE),
+    FRANCE = mean(FRANCE, na.rm = TRUE),
+    AUSTRALIA = mean(AUSTRALIA, na.rm = TRUE),
+    MEXICO = mean(MEXICO, na.rm = TRUE)
+  ) %>%
+  ungroup()
+```
+
+```{r}
+#FROMm <- FROM %>% rownames_to_column(var = "Date")
+FROMm$Date <- as.Date(FROMm$Date)
+
+fromm_long <- pivot_longer(FROMm, cols = c("US", "UK", "JAPAN", "GERMANY", "FRANCE", "AUSTRALIA", "MEXICO"), 
+                            names_to = "Variable", values_to = "FROM")
+```
+
+```{r}
+plots <- list()
+variables <- unique(fromm_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = fromm_long[fromm_long$Variable == variables[i], ], aes(x = Date, y = FROM)) +
+        geom_line(color = 'black', linewidth = 0.1) +
+        labs(y = "FROM", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'), 
+            axis.title.y = element_text(size = 7, face = 'bold'), 
+            axis.text = element_text(size = 10),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+
+combined_plot <- combined_plot & 
+                 plot_layout(heights = c(1, 1, 1, 1), widths = c(1, 1))
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) / (plots[[5]] | plots[[6]]) / (plots[[7]] | empty_plot) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/fromm.png", plot = combined_plot, width = 15, height = 15, dpi = 300)
+```
+
+### NPDC
+
+'US-UK', 'US-JAPAN', 'US-GERMANY', 'US-FRANCE', 'US-AUSTRALIA', 'US-MEXICO', 'UK-JAPAN', 'UK-GERMANY', 'UK-FRANCE', 'UK-AUSTRALIA', 'UK-MEXICO', 'JAPAN-GERMANY', 'JAPAN-FRANCE', 'JAPAN-AUSTRALIA', 'JAPAN-MEXICO', 'GERMANY-FRANCE', 'GERMANY-AUSTRALIA', 'GERMANY-MEXICO', 'FRANCE-AUSTRALIA', 'FRANCE-MEXICO', 'AUSTRALIA-MEXICO'
+
+```{r}
+NPDCm <- NPDC %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+    'US-UK' = mean(`US-UK`, na.rm = TRUE),
+    'US-JAPAN' = mean(`US-JAPAN`, na.rm=TRUE),
+    'US-GERMANY' = mean(`US-GERMANY`, na.rm=TRUE),
+    'US-FRANCE' = mean(`US-FRANCE`, na.rm=TRUE),
+    'US-AUSTRALIA' = mean(`US-AUSTRALIA`, na.rm=TRUE),
+    'US-MEXICO' = mean(`US-MEXICO`, na.rm=TRUE),
+    'UK-JAPAN' = mean(`UK-JAPAN`, na.rm = TRUE),
+    'UK-GERMANY' = mean(`UK-GERMANY`, na.rm=TRUE),
+    'UK-FRANCE' = mean(`UK-FRANCE`, na.rm=TRUE),
+    'UK-AUSTRALIA' = mean(`UK-AUSTRALIA`, na.rm=TRUE),
+    'UK-MEXICO' = mean(`UK-MEXICO`, na.rm=TRUE),
+    'JAPAN-GERMANY' = mean(`JAPAN-GERMANY`, na.rm=TRUE),
+    'JAPAN-FRANCE' = mean(`JAPAN-FRANCE`, na.rm = TRUE),
+    'JAPAN-AUSTRALIA' = mean(`JAPAN-AUSTRALIA`, na.rm=TRUE),
+    'JAPAN-MEXICO' = mean(`JAPAN-MEXICO`, na.rm=TRUE),
+    'GERMANY-FRANCE' = mean(`GERMANY-FRANCE`, na.rm=TRUE),
+    'GERMANY-AUSTRALIA' = mean(`GERMANY-AUSTRALIA`, na.rm=TRUE),
+    'GERMANY-MEXICO' = mean(`GERMANY-MEXICO`, na.rm=TRUE),
+    'FRANCE-AUSTRALIA' = mean(`FRANCE-AUSTRALIA`, na.rm=TRUE),
+    'FRANCE-MEXICO' = mean(`FRANCE-MEXICO`, na.rm=TRUE),
+    'AUSTRALIA-MEXICO' = mean(`AUSTRALIA-MEXICO`, na.rm=TRUE)
+  ) %>%
+  ungroup()
+```
+
+```{r}
+npdcm_long <- pivot_longer(NPDCm, cols = c('US-UK', 'US-JAPAN', 'US-GERMANY', 'US-FRANCE', 'US-AUSTRALIA', 'US-MEXICO', 'UK-JAPAN', 'UK-GERMANY', 'UK-FRANCE', 'UK-AUSTRALIA', 'UK-MEXICO', 'JAPAN-GERMANY', 'JAPAN-FRANCE', 'JAPAN-AUSTRALIA', 'JAPAN-MEXICO', 'GERMANY-FRANCE', 'GERMANY-AUSTRALIA', 'GERMANY-MEXICO', 'FRANCE-AUSTRALIA', 'FRANCE-MEXICO', 'AUSTRALIA-MEXICO'), 
+                            names_to = "Variable", values_to = "NPDC")
+
+```
+
+```{r}
+variables <- unique(npdc_long$Variable)
+plots <- list()
+
+for (i in seq_along(variables)) {
+  plots[[i]] <- ggplot(data = npdcm_long %>% filter(Variable == variables[i]), aes(x = Date, y = NPDC)) +
+    geom_line(linewidth = 0.1, color = "black") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    scale_color_manual(values = rep("solid", length(variables))) +
+    labs(y = "Net Connectedness", title = variables[i]) +
+    theme_bw(base_size = 20) + 
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7),
+      axis.title.y = element_text(size = 7),
+      axis.text = element_text(size = 10),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+n_cols <- ceiling(sqrt(length(variables)))
+n_rows <- ceiling(length(variables) / n_cols)
+
+combined_plot <- wrap_plots(plots, ncol = n_cols) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/npdcm.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+
+### PCI
+
+```{r}
+PCIm <- PCI %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+    'US-UK' = mean(`US-UK`, na.rm = TRUE),
+    'US-JAPAN' = mean(`US-JAPAN`, na.rm=TRUE),
+    'US-GERMANY' = mean(`US-GERMANY`, na.rm=TRUE),
+    'US-FRANCE' = mean(`US-FRANCE`, na.rm=TRUE),
+    'US-AUSTRALIA' = mean(`US-AUSTRALIA`, na.rm=TRUE),
+    'US-MEXICO' = mean(`US-MEXICO`, na.rm=TRUE),
+    'UK-JAPAN' = mean(`UK-JAPAN`, na.rm = TRUE),
+    'UK-GERMANY' = mean(`UK-GERMANY`, na.rm=TRUE),
+    'UK-FRANCE' = mean(`UK-FRANCE`, na.rm=TRUE),
+    'UK-AUSTRALIA' = mean(`UK-AUSTRALIA`, na.rm=TRUE),
+    'UK-MEXICO' = mean(`UK-MEXICO`, na.rm=TRUE),
+    'JAPAN-GERMANY' = mean(`JAPAN-GERMANY`, na.rm=TRUE),
+    'JAPAN-FRANCE' = mean(`JAPAN-FRANCE`, na.rm = TRUE),
+    'JAPAN-AUSTRALIA' = mean(`JAPAN-AUSTRALIA`, na.rm=TRUE),
+    'JAPAN-MEXICO' = mean(`JAPAN-MEXICO`, na.rm=TRUE),
+    'GERMANY-FRANCE' = mean(`GERMANY-FRANCE`, na.rm=TRUE),
+    'GERMANY-AUSTRALIA' = mean(`GERMANY-AUSTRALIA`, na.rm=TRUE),
+    'GERMANY-MEXICO' = mean(`GERMANY-MEXICO`, na.rm=TRUE),
+    'FRANCE-AUSTRALIA' = mean(`FRANCE-AUSTRALIA`, na.rm=TRUE),
+    'FRANCE-MEXICO' = mean(`FRANCE-MEXICO`, na.rm=TRUE),
+    'AUSTRALIA-MEXICO' = mean(`AUSTRALIA-MEXICO`, na.rm=TRUE)
+  ) %>%
+  ungroup()
+```
+
+```{r}
+pcim_long <- pivot_longer(PCIm, cols = c('US-UK', 'US-JAPAN', 'US-GERMANY', 'US-FRANCE', 'US-AUSTRALIA', 'US-MEXICO', 'UK-JAPAN', 'UK-GERMANY', 'UK-FRANCE', 'UK-AUSTRALIA', 'UK-MEXICO', 'JAPAN-GERMANY', 'JAPAN-FRANCE', 'JAPAN-AUSTRALIA', 'JAPAN-MEXICO', 'GERMANY-FRANCE', 'GERMANY-AUSTRALIA', 'GERMANY-MEXICO', 'FRANCE-AUSTRALIA', 'FRANCE-MEXICO', 'AUSTRALIA-MEXICO'), 
+                            names_to = "Variable", values_to = "PCI")
+
+variables <- unique(pcim_long$Variable)
+plots <- list()
+
+for (i in seq_along(variables)) {
+  plots[[i]] <- ggplot(data = pcim_long %>% filter(Variable == variables[i]), aes(x = Date, y = PCI)) +
+    geom_line(linewidth = 0.1, color = "black") +
+    scale_color_manual(values = rep("solid", length(variables))) +
+    labs(y = "Net Connectedness", title = variables[i]) +
+    theme_bw(base_size = 20) + 
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7),
+      axis.title.y = element_text(size = 7),
+      axis.text = element_text(size = 10),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+n_cols <- ceiling(sqrt(length(variables)))
+n_rows <- ceiling(length(variables) / n_cols)
+
+combined_plot <- wrap_plots(plots, ncol = n_cols) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/PCIm.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+```{r}
+to_col <- TOm %>% dplyr::select(US, UK, GERMANY, FRANCE, JAPAN, MEXICO, AUSTRALIA)
+
+# Select lagged columns from PCIm
+pcim_cols <- PCIm %>% dplyr::select(
+    `US-UK`,
+    `US-JAPAN`,
+    `US-GERMANY`,
+    `US-FRANCE`,
+    `US-AUSTRALIA`,
+    `US-MEXICO`,
+    `UK-JAPAN`,
+    `UK-GERMANY`,
+    `UK-FRANCE`,
+    `UK-AUSTRALIA`,
+    `UK-MEXICO`,
+    `JAPAN-GERMANY`,
+    `JAPAN-FRANCE`,
+    `JAPAN-AUSTRALIA`,
+    `JAPAN-MEXICO`,
+    `GERMANY-FRANCE`,
+    `GERMANY-AUSTRALIA`,
+    `GERMANY-MEXICO`,
+    `FRANCE-AUSTRALIA`,
+    `FRANCE-MEXICO`,
+    `AUSTRALIA-MEXICO`)
+
+dep <- cbind(to_col, pcim_cols)
+```
+
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(dep)[sapply(dep, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(dep[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results for All Variables",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+```{r}
+numeric_columns <- names(PCIm)[sapply(PCIm, is.numeric)]
+
+PCIm_firstdiff <- data.frame(
+    Date = PCIm$Date  # Include the date column if present
+)
+
+# Compute the first difference for each numeric column
+for (col in numeric_columns) {
+    PCIm_firstdiff[[col]] <- c(NA, diff(PCIm[[col]]))
+}
+
+# Initialize an empty data frame to store ADF results for the differenced data
+adf_results_diff <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+# Perform ADF tests on each numeric column in the differenced data frame
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(PCIm_firstdiff[[col]])
+    adf_results_diff <- rbind(adf_results_diff, c(col, results))
+}
+
+# Convert numeric columns to numeric data types
+adf_results_diff[, -1] <- lapply(adf_results_diff[, -1], as.numeric)
+
+# Set column names
+colnames(adf_results_diff) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+# Use stargazer to display the results in LaTeX format
+library(stargazer)
+stargazer(adf_results_diff, type = "latex", summary = FALSE,
+          title = "ADF Test Results for PCI first diff",
+          rownames = FALSE,
+          digits = 4)
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(PCIm)[sapply(PCIm, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(PCIm[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+# Convert numeric columns to numeric data types
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+
+# Set column names
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results for plain volatility",
+          rownames = FALSE,
+          digits = 4)
+```
+
+
+```{r}
+relevant_columns <- colnames(dep)[2:length(colnames(dep))]
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(dep[[col]])))
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("N", "Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE)
+```
+
+
+
+
+## Explanatory variables whole
+
+```{r}
+#reading the explanatory variable excel file
+EXP <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/EMEExplanatory.xlsx")
+#EXP$Date <- as.Date(EXP$Date)
+#cut <- as.Date("2002-08-01")
+#EXP <- EXP[EXP$Date >= cut, ]
+```
+
+### correlation
+
+```{r}
+start_date <- as.Date("2006-04-01")
+end_date <- as.Date("2024-03-01")
+
+#UK
+UK <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/UK.xlsx", sheet = 1)
+UK$Date <- as.Date(UK$Date, format = "%Y-%m-%d")
+UK <- UK %>% filter(Date >= start_date & Date <= end_date)
+
+#France
+France <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/France.xlsx", sheet = 1)
+France$Date <- as.Date(France$Date, format = "%Y-%m-%d")
+France <- France %>% filter(Date >= start_date & Date <= end_date)
+
+#Germany
+Germany <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Germany.xlsx", sheet = 1)
+Germany$Date <- as.Date(Germany$Date, format = "%Y-%m-%d")
+Germany <- Germany %>% filter(Date >= start_date & Date <= end_date)
+
+#Japan
+Japan <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Japan.xlsx", sheet = 1)
+Japan$Date <- as.Date(Japan$Date, format = "%Y-%m-%d")
+Japan <- Japan %>% filter(Date >= start_date & Date <= end_date)
+
+# Australia
+Australia <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Australia.xlsx", sheet = 1)
+Australia$Date <- as.Date(Australia$Date, format = "%Y-%m-%d")
+Australia <- Australia %>% filter(Date >= start_date & Date <= end_date)
+
+#Mexicox
+Mexico <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Mexico.xlsx", sheet = 1)
+Mexico$Date <- as.Date(Mexico$Date, format = "%Y-%m-%d")
+Mexico <- Mexico %>% filter(Date >= start_date & Date <= end_date)
+
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(UK)[sapply(UK, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(UK[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+# Convert numeric columns to numeric data types
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+
+# Set column names
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test UK",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+
+```{r}
+relevant_columns <- colnames(UK)[2:length(colnames(UK))]  # Assuming the first column is "Date"
+
+# Compute summaries
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(UK[[col]])))
+
+# Convert to a data frame and add column names
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("N", "Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE)
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(Germany)[sapply(Germany, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(Germany[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Germany",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+
+```{r}
+relevant_columns <- colnames(Germany)[2:length(colnames(Germany))]
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(Germany[[col]])))
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("N", "Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE)
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(France)[sapply(France, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(France[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test France",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+
+
+```{r}
+relevant_columns <- colnames(France)[2:length(colnames(France))]
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(France[[col]])))
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("N", "Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE)
+```
+
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(Japan)[sapply(Japan, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(Japan[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results Japan",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+
+
+```{r}
+relevant_columns <- colnames(Japan)[2:length(colnames(Japan))]
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(Japan[[col]])))
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("N", "Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE)
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(Mexico)[sapply(Mexico, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(Mexico[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Mexico",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+
+```{r}
+relevant_columns <- colnames(Mexico)[2:length(colnames(Mexico))]  # Assuming the first column is "Date"
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(Mexico[[col]])))
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("N", "Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE)
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(Australia)[sapply(Australia, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(Australia[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+# Convert numeric columns to numeric data types
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+
+# Set column names
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results Australia",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+
+```{r}
+relevant_columns <- colnames(Australia)[2:length(colnames(Australia))]  # Assuming the first column is "Date"
+
+# Compute summaries
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(Australia[[col]])))
+
+# Convert to a data frame and add column names
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("N", "Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE)
+```
+
+
+
+## Individual country heatmaps
+
+```{r}
+
+files <- list(
+  "UK" = "/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/UK.xlsx",
+  "France" = "/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/France.xlsx",
+  "Germany" = "/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Germany.xlsx",
+  "Japan" = "/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Japan.xlsx",
+  "Australia" = "/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Australia.xlsx",
+  "Mexico" = "/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Mexico.xlsx"
+)
+
+for (country in names(files)) {
+  file_path <- files[[country]]
+
+  data <- read_excel(file_path)
+
+  data_numeric <- select_if(data, is.numeric)
+
+  cor_matrix <- cor(data_numeric, use = "pairwise.complete.obs")
+  
+  cor_melted <- reshape2::melt(cor_matrix)
+  names(cor_melted) <- c("Var1", "Var2", "value")
+
+  heatmap <- ggplot(cor_melted, aes(Var1, Var2, fill = value)) +
+    geom_tile() +
+    geom_text(aes(label = sprintf("%.2f", value)), size = 2.5, color = "black", family = "Times New Roman") +
+    scale_fill_gradient2(low = "white", high = "red", mid = "yellow", midpoint = 0, limit = c(-1, 1), space = "Lab", name = "Correlation") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, family = "Times New Roman"),
+          axis.text.y = element_text(family = "Times New Roman"),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          plot.title = element_text(family = "Times New Roman", face = "bold", size = 14, hjust = 0.5)) +
+    labs(fill = "Correlation", title = paste("", country))
+
+  ggsave(paste0("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/correlation_", country, ".png"), plot = heatmap, width = 10, height = 8, dpi = 300)
+}
+
+```
+
+### Merging Dataframes
+
+```{r}
+#Merging Dataframes
+#TCI
+TCIm <- merge(TCIm, EXP, by = "Date")
+#TO
+TOm <- merge(TOm, EXP, by = "Date")
+#FROM
+FROMm <- merge(FROMm, EXP, by = "Date")
+#NPDC
+NPDCm <- merge(NPDCm, EXP, by = "Date")
+#PCI
+PCIm <- merge(PCIm, EXP, by = "Date")
+```
+
+# PCI with US
+
+```{r}
+PCIwithUS <- PCIm %>% dplyr::select(Date, `US-UK`, `US-FRANCE`, `US-GERMANY`, `US-AUSTRALIA`, `US-JAPAN`, `US-MEXICO`)
+
+colnames(PCIwithUS) <- c("Date", "UK", "France", "Germany", "Australia", "Japan", "Mexico")
+
+PCIwithUS$Date <- as.Date(PCIwithUS$Date)
+
+countries <- c("UK", "France", "Germany", "Australia", "Japan", "Mexico")
+```
+
+```{r}
+countries <- c("UK", "France", "Germany", "Australia", "Japan", "Mexico")
+
+plots <- list()
+for (i in 1:length(countries)) {
+  country <- countries[i]
+  plots[[i]] <- ggplot(data = PCIwithUS, aes(x = Date, y = !!sym(country))) +
+    geom_line(color = 'black', linewidth = 0.3) +
+    labs(y = country, title = country) +
+    theme_bw(base_size = 20) +
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7, face = 'bold'),
+      axis.title.y = element_text(size = 7, face = 'bold'),
+      axis.text = element_text(size = 5),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+empty_plot <- ggplot() +
+  theme_void() +
+  theme(
+    plot.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank()
+  ) +
+  labs(title = " ")
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) / (plots[[5]] | plots[[6]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+print(combined_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/PCIwithUS.png", 
+       plot = combined_plot, width = 15, height = 15, dpi = 300)
+```
+
+# loading explanatory in panel format
+
+```{r}
+start_date <- as.Date("2006-04-01")
+end_date <- as.Date("2024-03-01")
+
+#UK
+UK <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/UK.xlsx", sheet = 1)
+UK$Date <- as.Date(UK$Date, format = "%Y-%m-%d")
+UK <- UK %>% filter(Date >= start_date & Date <= end_date)
+
+#France
+France <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/France.xlsx", sheet = 1)
+France$Date <- as.Date(France$Date, format = "%Y-%m-%d")
+France <- France %>% filter(Date >= start_date & Date <= end_date)
+
+#Germany
+Germany <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Germany.xlsx", sheet = 1)
+Germany$Date <- as.Date(Germany$Date, format = "%Y-%m-%d")
+Germany <- Germany %>% filter(Date >= start_date & Date <= end_date)
+
+#Japan
+Japan <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Japan.xlsx", sheet = 1)
+Japan$Date <- as.Date(Japan$Date, format = "%Y-%m-%d")
+Japan <- Japan %>% filter(Date >= start_date & Date <= end_date)
+
+# Australia
+Australia <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Australia.xlsx", sheet = 1)
+Australia$Date <- as.Date(Australia$Date, format = "%Y-%m-%d")
+Australia <- Australia %>% filter(Date >= start_date & Date <= end_date)
+
+#Mexicox
+Mexico <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Panel data/Mexico.xlsx", sheet = 1)
+Mexico$Date <- as.Date(Mexico$Date, format = "%Y-%m-%d")
+Mexico <- Mexico %>% filter(Date >= start_date & Date <= end_date)
+
+```
+
+### Create explanatory variable only panel data frame
+
+```{r}
+UK$Country <- "UK"
+France$Country <- "France"
+Germany$Country <- "Germany"
+Japan$Country <- "Japan"
+Australia$Country <- "Australia"
+Mexico$Country <- "Mexico"
+
+panelEXP <- bind_rows(UK, France, Germany, Japan, Australia, Mexico)
+```
+
+### Corndog index
+
+```{r}
+panelEXP_filtered <- panelEXP %>% filter(Date >= as.Date("2015-01-01"))
+
+corndog_plot <- ggplot(panelEXP_filtered, aes(x = Date, y = Corndog, color = Country)) +
+  geom_line(linewidth = 0.3) +
+  labs(y = "Corndog") +
+  theme_bw(base_size = 20) +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 5),
+    legend.position = "right",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(corndog_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/corndog.png",
+       plot = corndog_plot, width = 15, height = 10, dpi = 300)
+```
+
+```{r}
+countries <- unique(panelEXP_filtered$Country)
+plots <- list()
+for (i in seq_along(countries)) {
+  country <- countries[i]
+  # Create individual plots for each country
+  plots[[i]] <- ggplot(data = subset(panelEXP_filtered, Country == country), aes(x = Date, y = Corndog)) +
+    geom_line(color = 'black', linewidth = 0.3) +
+    labs(y = "Corndog", title = country) +
+    theme_bw(base_size = 20) +
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7, face = 'bold'),
+      axis.title.y = element_text(size = 7, face = 'bold'),
+      axis.text = element_text(size = 5),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) / (plots[[5]] | plots[[6]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+print(combined_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/corndog_combined.png",
+       plot = combined_plot, width = 15, height = 15, dpi = 300)
+```
+
+```{r}
+# Define a function to compute summary statistics with NA handling
+compute_summary_stats <- function(series) {
+  non_na_length <- sum(!is.na(series))
+  return(c(
+    N = non_na_length,
+    Mean = mean(series, na.rm = TRUE),
+    StDev = sd(series, na.rm = TRUE),
+    Min = min(series, na.rm = TRUE),
+    Max = max(series, na.rm = TRUE)
+  ))
+}
+
+# Compute summary statistics for each country
+uk_stats <- compute_summary_stats(UK$Corndog)
+japan_stats <- compute_summary_stats(Japan$Corndog)
+germany_stats <- compute_summary_stats(Germany$Corndog)
+france_stats <- compute_summary_stats(France$Corndog)
+australia_stats <- compute_summary_stats(Australia$Corndog)
+mexico_stats <- compute_summary_stats(Mexico$Corndog)
+
+# Combine all statistics into a single data frame
+summary_df <- data.frame(
+  Country = c("UK", "Japan", "Germany", "France", "Australia", "Mexico"),
+  N = c(uk_stats["N"], japan_stats["N"], germany_stats["N"], france_stats["N"], australia_stats["N"], mexico_stats["N"]),
+  Mean = c(uk_stats["Mean"], japan_stats["Mean"], germany_stats["Mean"], france_stats["Mean"], australia_stats["Mean"], mexico_stats["Mean"]),
+  StDev = c(uk_stats["StDev"], japan_stats["StDev"], germany_stats["StDev"], france_stats["StDev"], australia_stats["StDev"], mexico_stats["StDev"]),
+  Min = c(uk_stats["Min"], japan_stats["Min"], germany_stats["Min"], france_stats["Min"], australia_stats["Min"], mexico_stats["Min"]),
+  Max = c(uk_stats["Max"], japan_stats["Max"], germany_stats["Max"], france_stats["Max"], australia_stats["Max"], mexico_stats["Max"])
+)
+
+# Use stargazer to generate a summary table for the consolidated data
+stargazer(summary_df, type = "latex", summary = FALSE, rownames = FALSE, title = "Summary Statistics for Corndog by Country")
+
+```
+
+```{r}
+# Define a function to compute summary statistics with NA handling
+compute_summary_stats <- function(series) {
+  non_na_length <- sum(!is.na(series))
+  return(c(
+    N = non_na_length,
+    Mean = mean(series, na.rm = TRUE),
+    StDev = sd(series, na.rm = TRUE),
+    Min = min(series, na.rm = TRUE),
+    Max = max(series, na.rm = TRUE)
+  ))
+}
+
+# Compute summary statistics for each country
+uk_stats <- compute_summary_stats(UK$Cooperation)
+japan_stats <- compute_summary_stats(Japan$Cooperation)
+germany_stats <- compute_summary_stats(Germany$Cooperation)
+france_stats <- compute_summary_stats(France$Cooperation)
+australia_stats <- compute_summary_stats(Australia$Cooperation)
+mexico_stats <- compute_summary_stats(Mexico$Cooperation)
+
+# Combine all statistics into a single data frame
+summary_df <- data.frame(
+  Country = c("UK", "Japan", "Germany", "France", "Australia", "Mexico"),
+  N = c(uk_stats["N"], japan_stats["N"], germany_stats["N"], france_stats["N"], australia_stats["N"], mexico_stats["N"]),
+  Mean = c(uk_stats["Mean"], japan_stats["Mean"], germany_stats["Mean"], france_stats["Mean"], australia_stats["Mean"], mexico_stats["Mean"]),
+  StDev = c(uk_stats["StDev"], japan_stats["StDev"], germany_stats["StDev"], france_stats["StDev"], australia_stats["StDev"], mexico_stats["StDev"]),
+  Min = c(uk_stats["Min"], japan_stats["Min"], germany_stats["Min"], france_stats["Min"], australia_stats["Min"], mexico_stats["Min"]),
+  Max = c(uk_stats["Max"], japan_stats["Max"], germany_stats["Max"], france_stats["Max"], australia_stats["Max"], mexico_stats["Max"])
+)
+
+# Use stargazer to generate a summary table for the consolidated data
+stargazer(summary_df, type = "latex", summary = FALSE, rownames = FALSE, title = "Summary Statistics for Cooperation by Country")
+```
+
+### Cooperation index
+
+```{r}
+#panelEXP_filtered <- panelEXP %>% filter(Date >= as.Date("2015-01-01"))
+
+cooperation_plot <- ggplot(panelEXP, aes(x = Date, y = Cooperation, color = Country)) +
+  geom_line(linewidth = 0.3) +
+  labs(y = "Cooperation") +
+  theme_bw(base_size = 20) +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 5),
+    legend.position = "right",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(cooperation_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/cooperation.png",
+       plot = cooperation_plot, width = 15, height = 10, dpi = 300)
+```
+
+```{r}
+countries <- unique(panelEXP$Country)
+
+plots <- list()
+for (i in seq_along(countries)) {
+  country <- countries[i]
+  # Create individual plots for each country
+  plots[[i]] <- ggplot(data = subset(panelEXP, Country == country), aes(x = Date, y = Cooperation)) +
+    geom_line(color = 'black', linewidth = 0.3) +
+    labs(y = "Net Cooperation Impact", title = country) +
+    theme_bw(base_size = 20) +
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7, face = 'bold'),
+      axis.title.y = element_text(size = 7, face = 'bold'),
+      axis.text = element_text(size = 5),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) / (plots[[5]] | plots[[6]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+print(combined_plot)
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/cooperation_combined.png",
+       plot = combined_plot, width = 15, height = 15, dpi = 300)
+```
+
+### correlation matrix
+
+```{r}
+panel_numeric <- panelEXP %>% dplyr::select(-Date, -Country)
+cor_matrix <- cor(panel_numeric, use = "pairwise.complete.obs")
+cor_melted <- melt(cor_matrix)
+names(cor_melted) <- c("Var1", "Var2", "value")
+
+heatmap <- ggplot(cor_melted, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%.2f", value)), size = 2.5, color = "black", family = "Times New Roman") +
+  scale_fill_gradient2(low = "white", high = "red", mid = "yellow", midpoint = 0, limit = c(-1, 1), space = "Lab", name="Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, family = "Times New Roman"),
+        axis.text.y = element_text(family = "Times New Roman"),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +
+  labs(fill = "Correlation")
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/EME/Plots/panelEXPheatmap.png", plot = heatmap, width = 10, height = 8, dpi = 300)
+
+print(heatmap)
+```
+
+## Putting each countries PCI with US into their country dataframe.
+
+```{r}
+#UK
+UK <- UK %>%
+  left_join(PCIwithUS %>% dplyr::select(Date, UK), by = "Date")
+
+colnames(UK)[colnames(UK) == "UK"] <- "PCI"
+
+#France
+France <- France %>%
+  left_join(PCIwithUS %>% dplyr::select(Date, France), by = "Date")
+
+colnames(France)[colnames(France) == "France"] <- "PCI"
+
+#germany
+Germany <- Germany %>%
+  left_join(PCIwithUS %>% dplyr::select(Date, Germany), by = "Date")
+
+colnames(Germany)[colnames(Germany) == "Germany"] <- "PCI"
+
+#japan
+Japan <- Japan %>%
+  left_join(PCIwithUS %>% dplyr::select(Date, Japan), by = "Date")
+
+colnames(Japan)[colnames(Japan) == "Japan"] <- "PCI"
+
+#australia
+Australia <- Australia %>%
+  left_join(PCIwithUS %>% dplyr::select(Date, Australia), by = "Date")
+
+colnames(Australia)[colnames(Australia) == "Australia"] <- "PCI"
+
+#mexico
+Mexico <- Mexico %>%
+  left_join(PCIwithUS %>% dplyr::select(Date, Mexico), by = "Date")
+
+colnames(Mexico)[colnames(Mexico) == "Mexico"] <- "PCI"
+```
+
+## putting each country's TO into their country datafram
+
+```{r}
+#UK
+UK <- UK %>%
+  left_join(dplyr::select(TOm, Date, UK), by = "Date")
+  
+colnames(UK)[colnames(UK) == "UK"] <- "TO"
+
+#France
+France <- France %>%
+  left_join(dplyr::select(TOm, Date, FRANCE), by = "Date")
+  
+colnames(France)[colnames(France) == "FRANCE"] <- "TO"
+
+#germany
+Germany <- Germany %>%
+  left_join(dplyr::select(TOm, Date, GERMANY), by = "Date")
+  
+colnames(Germany)[colnames(Germany) == "GERMANY"] <- "TO"
+
+#Japan
+Japan <- Japan %>%
+  left_join(dplyr::select(TOm, Date, JAPAN), by = "Date")
+  
+colnames(Japan)[colnames(Japan) == "JAPAN"] <- "TO"
+
+#australia
+Australia <- Australia %>%
+  left_join(dplyr::select(TOm, Date, AUSTRALIA), by = "Date")
+  
+colnames(Australia)[colnames(Australia) == "AUSTRALIA"] <- "TO"
+
+#mexico
+Mexico <- Mexico %>%
+  left_join(dplyr::select(TOm, Date, MEXICO), by = "Date")
+  
+colnames(Mexico)[colnames(Mexico) == "MEXICO"] <- "TO"
+```
+
+# Add lags
+
+```{r}
+# UK
+UK <- UK %>%
+  dplyr::mutate(TO_lag1 = dplyr::lag(TO, n = 1),
+         TO_lag2 = dplyr::lag(TO, n = 2),
+         PCI_lag1 = dplyr::lag(PCI, n = 1),
+         PCI_lag2 = dplyr::lag(PCI, n = 2),
+         TO_diff = TO - dplyr::lag(TO, n = 1),
+         PCI_diff = PCI - dplyr::lag(PCI, n = 1),
+         TO_difflag1 = dplyr::lag(TO_diff, n = 1),
+         PCI_difflag1 = dplyr::lag(PCI_diff, n =1))
+
+# France
+France <- France %>%
+  dplyr::mutate(TO_lag1 = dplyr::lag(TO, n = 1),
+         TO_lag2 = dplyr::lag(TO, n = 2),
+         PCI_lag1 = dplyr::lag(PCI, n = 1),
+         PCI_lag2 = dplyr::lag(PCI, n = 2),
+         TO_diff = TO - dplyr::lag(TO, n = 1),
+         PCI_diff = PCI - dplyr::lag(PCI, n = 1),
+         TO_difflag1 = dplyr::lag(TO_diff, n = 1),
+         PCI_difflag1 = dplyr::lag(PCI_diff, n =1))
+
+# Germany
+Germany <- Germany %>%
+  dplyr::mutate(TO_lag1 = dplyr::lag(TO, n = 1),
+         TO_lag2 = dplyr::lag(TO, n = 2),
+         PCI_lag1 = dplyr::lag(PCI, n = 1),
+         PCI_lag2 = dplyr::lag(PCI, n = 2),
+         TO_diff = TO - dplyr::lag(TO, n = 1),
+         PCI_diff = PCI - dplyr::lag(PCI, n = 1),
+         TO_difflag1 = dplyr::lag(TO_diff, n = 1),
+         PCI_difflag1 = dplyr::lag(PCI_diff, n =1))
+
+# Japan
+Japan <- Japan %>%
+  dplyr::mutate(TO_lag1 = dplyr::lag(TO, n = 1),
+         TO_lag2 = dplyr::lag(TO, n = 2),
+         PCI_lag1 = dplyr::lag(PCI, n = 1),
+         PCI_lag2 = dplyr::lag(PCI, n = 2),
+         TO_diff = TO - dplyr::lag(TO, n = 1),
+         PCI_diff = PCI - dplyr::lag(PCI, n = 1),
+         TO_difflag1 = dplyr::lag(TO_diff, n = 1),
+         PCI_difflag1 = dplyr::lag(PCI_diff, n =1))
+
+# Australia
+Australia <- Australia %>%
+  dplyr::mutate(TO_lag1 = dplyr::lag(TO, n = 1),
+         TO_lag2 = dplyr::lag(TO, n = 2),
+         PCI_lag1 = dplyr::lag(PCI, n = 1),
+         PCI_lag2 = dplyr::lag(PCI, n = 2),
+         TO_diff = TO - dplyr::lag(TO, n = 1),
+         PCI_diff = PCI - dplyr::lag(PCI, n = 1),
+         TO_difflag1 = dplyr::lag(TO_diff, n = 1),
+         PCI_difflag1 = dplyr::lag(PCI_diff, n =1))
+
+# Mexico
+Mexico <- Mexico %>%
+  dplyr::mutate(TO_lag1 = dplyr::lag(TO, n = 1),
+         TO_lag2 = dplyr::lag(TO, n = 2),
+         PCI_lag1 = dplyr::lag(PCI, n = 1),
+         PCI_lag2 = dplyr::lag(PCI, n = 2),
+         TO_diff = TO - dplyr::lag(TO, n = 1),
+         PCI_diff = PCI - dplyr::lag(PCI, n = 1),
+         TO_difflag1 = dplyr::lag(TO_diff, n = 1),
+         PCI_difflag1 = dplyr::lag(PCI_diff, n =1))
+```
+
+## remove spaces from dataframes
+
+```{r}
+colnames(UK) <- gsub("\\.", "", colnames(UK))
+colnames(UK) <- gsub("\\-", "", colnames(UK))
+colnames(UK) <- gsub("\\ ", "", colnames(UK))
+colnames(France) <- gsub("\\.", "", colnames(France))
+colnames(France) <- gsub("\\-", "", colnames(France))
+colnames(France) <- gsub("\\ ", "", colnames(France))
+colnames(Germany) <- gsub("\\.", "", colnames(Germany))
+colnames(Germany) <- gsub("\\-", "", colnames(Germany))
+colnames(Germany) <- gsub("\\ ", "", colnames(Germany))
+colnames(Japan) <- gsub("\\.", "", colnames(Japan))
+colnames(Japan) <- gsub("\\-", "", colnames(Japan))
+colnames(Japan) <- gsub("\\ ", "", colnames(Japan))
+colnames(Mexico) <- gsub("\\.", "", colnames(Mexico))
+colnames(Mexico) <- gsub("\\-", "", colnames(Mexico))
+colnames(Mexico) <- gsub("\\ ", "", colnames(Mexico))
+colnames(Australia) <- gsub("\\.", "", colnames(Australia))
+colnames(Australia) <- gsub("\\-", "", colnames(Australia))
+colnames(Australia) <- gsub("\\ ", "", colnames(Australia))
+
+
+#colnames(panel_data) <- gsub("\\.", "", colnames(panel_data))
+#colnames(panel_data) <- gsub("\\.", "", colnames(panel_data))
+#colnames(panel_data) <- gsub("\\.", "", colnames(panel_data))
+#colnames(panel_data) <- gsub("\\.", "", colnames(panel_data))
+#colnames(panel_data) <- gsub("\\.", "", colnames(panel_data))
+```
+
+## create panel dataframe
+
+```{r}
+panelALL <- bind_rows(UK, France, Germany, Japan, Australia, Mexico)
+colnames(panelALL) <- gsub("\\.", "", colnames(panelALL))
+
+```
+
+# Bayes Information Criterion
+
+```{r}
+find_optimal_arima_lags <- function(series) {
+  model <- auto.arima(series, max.order = 10, ic = "bic", seasonal = FALSE)
+  return(model)
+}
+```
+
+## UK
+
+```{r}
+
+optimal_model_pci_uk <- find_optimal_arima_lags(UK$PCI)
+optimal_model_to_uk <- find_optimal_arima_lags(UK$TO)
+
+optimal_lags_pci_uk <- optimal_model_pci_uk$arma[1]
+optimal_lags_to_uk <- optimal_model_to_uk$arma[1]
+
+
+print(optimal_lags_pci_uk)
+print(optimal_lags_to_uk)
+
+```
+
+##Australia
+
+```{r}
+
+optimal_model_pci_aus <- find_optimal_arima_lags(Australia$PCI)
+optimal_model_to_aus <- find_optimal_arima_lags(Australia$TO)
+
+optimal_lags_pci_aus <- optimal_model_pci_aus$arma[1]
+optimal_lags_to_aus <- optimal_model_to_aus$arma[1]
+
+
+print(optimal_lags_pci_aus)
+print(optimal_lags_to_aus)
+
+```
+
+##France
+
+```{r}
+
+optimal_model_pci_France <- find_optimal_arima_lags(France$PCI)
+optimal_model_to_France <- find_optimal_arima_lags(France$TO)
+
+optimal_lags_pci_France <- optimal_model_pci_France$arma[1]
+optimal_lags_to_France <- optimal_model_to_France$arma[1]
+
+
+print(optimal_lags_pci_France)
+print(optimal_lags_to_France)
+
+```
+
+##Germany
+
+```{r}
+
+optimal_model_pci_Germany <- find_optimal_arima_lags(Germany$PCI)
+optimal_model_to_Germany <- find_optimal_arima_lags(Germany$TO)
+
+optimal_lags_pci_Germany <- optimal_model_pci_Germany$arma[1]
+optimal_lags_to_Germany <- optimal_model_to_Germany$arma[1]
+
+
+print(optimal_lags_pci_Germany)
+print(optimal_lags_to_Germany)
+
+```
+
+##Japan
+
+```{r}
+
+optimal_model_pci_Japan <- find_optimal_arima_lags(Japan$PCI)
+optimal_model_to_Japan <- find_optimal_arima_lags(Japan$TO)
+
+optimal_lags_pci_Japan <- optimal_model_pci_Japan$arma[1]
+optimal_lags_to_Japan <- optimal_model_to_Japan$arma[1]
+
+
+print(optimal_lags_pci_Japan)
+print(optimal_lags_to_Japan)
+
+```
+
+##Mexico
+
+```{r}
+
+optimal_model_pci_Mexico <- find_optimal_arima_lags(Mexico$PCI)
+optimal_model_to_Mexico <- find_optimal_arima_lags(Mexico$TO)
+
+optimal_lags_pci_Mexico <- optimal_model_pci_Mexico$arma[1]
+optimal_lags_to_Mexico <- optimal_model_to_Mexico$arma[1]
+
+
+print(optimal_lags_pci_Mexico)
+print(optimal_lags_to_Mexico)
+
+```
+
+```{r}
+colnames(UK)
+```
+
+# TO Models
+
+## RAW
+
+### ADF tests
+
+```{r}
+adf_UK <- adf.test(UK$TO, alternative = "stationary")
+adf_Australia <- adf.test(Australia$TO, alternative = "stationary")
+adf_Japan <- adf.test(Japan$TO, alternative = "stationary")
+adf_France <- adf.test(France$TO, alternative = "stationary")
+adf_Germany <- adf.test(Germany$TO, alternative = "stationary")
+adf_Mexico <- adf.test(Mexico$TO, alternative = "stationary")
+adf_UK
+adf_Australia
+adf_Japan
+adf_France
+adf_Germany
+adf_Mexico
+```
+
+### UK
+
+```{r}
+colnames(UK)
+```
+
+```{r}
+UT <- lm(TO ~ TO_lag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC + Sentiment + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + DebtGDP + OilPrice,
+                data = UK)
+
+residuals <- residuals(UT)
+summary(UT)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### France
+
+include
+
+```{r}
+colnames(France)
+```
+
+```{r}
+FT <- lm(TO ~ TO_lag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC + Sentiment + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + DebtGDP + OilPrice,
+                data = France)
+
+residuals <- residuals(FT)
+summary(FT)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Germany
+
+```{r}
+colnames(Germany)
+```
+
+```{r}
+GT <- lm(TO ~ TO_lag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC + Sentiment + OilPrice + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX,
+                data = Germany)
+
+residuals <- residuals(GT)
+summary(GT)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Japan
+
+```{r}
+colnames(Japan)
+```
+
+```{r}
+JT <- lm(TO ~ TO_lag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC +
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + DebtGDP + OilPrice,
+                data = Japan)
+
+residuals <- residuals(JT)
+summary(JT)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+### Mexico
+
+```{r}
+MT <- lm(TO ~ TO_lag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + DebtGDP + OilPrice,
+                data = Mexico)
+
+residuals <- residuals(MT)
+summary(MT)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Australia
+
+```{r}
+AT <- lm(TO ~ TO_lag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + DebtGDP + Sentiment+ OilPrice,
+                data = Australia)
+
+residuals <- residuals(AT)
+summary(AT)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Panel Regression
+
+#### Set up of panel data frame
+
+```{r}
+panelALL$Date <- as.Date(panelALL$Date)
+panel_data <- pdata.frame(panelALL, index = c("Country", "Date"))
+colnames(panel_data) <- gsub("\\.", "", colnames(panel_data))
+```
+
+```{r}
+colnames(panel_data)
+```
+
+```{r}
+panelmodelcolumns <- c(
+  "Date", "TradeFreedom", 
+  "DebtGDP", "Zscore", "EPU", "USExportWeight", "iMAPPAttitude", 
+  "MacrobondBC", "Sentiment", "M1Reserves", "FDIGDP", "ForeignReservesGDP", "Cooperation", 
+  "Corndog", "USTradePolicyEPU", "VIX", "USRecessionProbability", "OilPrice", 
+  "USiMAPPAttitude", "Country", "PCI", "TO", "TO_lag1", "TO_lag2", "PCI_lag1", "PCI_lag2"
+)
+
+
+panel_subset <- panel_data[panelmodelcolumns]
+```
+
+```{r}
+colnames(panel_subset)
+```
+
+#### Haussman Test for Fixed Effects
+
+```{r}
+fixed <- plm(
+  TO ~ TO_lag1 + TradeFreedom + EPU + Zscore,
+  data = panel_subset,
+  model = "within"
+)
+
+summary(fixed)
+```
+
+```{r}
+random <- plm(
+  TO ~ TO_lag1 + TradeFreedom + EPU + Zscore,
+  data = panel_subset,
+  model = "random"
+)
+
+summary(random)
+```
+
+```{r}
+hausman_result <- phtest(fixed, random)
+print(hausman_result)
+```
+
+#### Panel Model
+
+```{r}
+PT <- plm(
+  TO ~ TO_lag1 + TradeFreedom + DebtGDP + Zscore + EPU + iMAPPAttitude + MacrobondBC + M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice,
+  data = panel_subset,
+  model = "within"
+)
+residuals <- residuals(PT)
+summary(PT)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+####Stargazer panel model
+
+```{r}
+stargazer(UT, FT, GT, JT, MT, AT, PT, type = "latex", style = "aer")
+```
+
+## First Differences
+
+### ADF tests
+
+```{r}
+UKadf <- UK %>%
+  dplyr::filter(!is.na(TO_diff))
+
+# Australia
+Australiaadf <- Australia %>%
+  dplyr::filter(!is.na(TO_diff))
+
+# Japan
+Japanadf <- Japan %>%
+  dplyr::filter(!is.na(TO_diff))
+
+# France
+Franceadf <- France %>%
+  dplyr::filter(!is.na(TO_diff))
+
+# Germany
+Germanyadf <- Germany %>%
+  dplyr::filter(!is.na(TO_diff))
+
+# Mexico
+Mexicoadf <- Mexico %>%
+  dplyr::filter(!is.na(TO_diff))
+
+adf_UK <- adf.test(UKadf$TO_diff, alternative = "stationary")
+adf_Australia <- adf.test(Australiaadf$TO_diff, alternative = "stationary")
+adf_Japan <- adf.test(Japanadf$TO_diff, alternative = "stationary")
+adf_France <- adf.test(Franceadf$TO_diff, alternative = "stationary")
+adf_Germany <- adf.test(Germanyadf$TO_diff, alternative = "stationary")
+adf_Mexico <- adf.test(Mexicoadf$TO_diff, alternative = "stationary")
+adf_UK
+adf_Australia
+adf_Japan
+adf_France
+adf_Germany
+adf_Mexico
+```
+
+
+
+### UK
+
+```{r}
+colnames(UK)
+```
+
+```{r}
+UTd <- lm(TO_diff ~ TO_difflag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC + `Sentiment` + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + DebtGDP + OilPrice,
+                data = UK)
+
+residuals <- residuals(UTd)
+summary(UTd)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### France
+
+include
+
+```{r}
+colnames(France)
+```
+
+```{r}
+FTd <- lm(TO_diff ~ TO_difflag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC + `Sentiment` + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + DebtGDP + OilPrice,
+                data = France)
+
+residuals <- residuals(FTd)
+summary(FTd)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Germany
+
+```{r}
+colnames(Germany)
+```
+
+```{r}
+GTd <- lm(TO_diff ~ TO_difflag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC + `Sentiment` + OilPrice + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX,
+                data = Germany)
+
+residuals <- residuals(GTd)
+summary(GTd)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Japan
+
+```{r}
+colnames(Japan)
+```
+
+```{r}
+JTd <- lm(TO_diff ~ TO_difflag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC +
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + DebtGDP + OilPrice,
+                data = Japan)
+
+residuals <- residuals(JTd)
+summary(JTd)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Mexico
+
+```{r}
+MTd <- lm(TO_diff ~ TO_difflag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + DebtGDP + OilPrice,
+                data = Mexico)
+
+residuals <- residuals(MTd)
+summary(MTd)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Australia
+
+```{r}
+ATd <- lm(TO_diff ~ TO_difflag1 + TradeFreedom + DebtGDP + Zscore + EPU + 
+                 iMAPPAttitude + MacrobondBC + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + DebtGDP + OilPrice + Sentiment,
+                data = Australia)
+
+residuals <- residuals(ATd)
+summary(ATd)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+
+
+### Panel Regression
+
+#### Set up of panel data frame
+
+```{r}
+panelALLdiff <- bind_rows(UK, France, Germany, Japan, Australia, Mexico)
+colnames(panelALLdiff) <- gsub("\\.", " ", colnames(panelALLdiff))
+panelALLdiff$Date <- as.Date(panelALLdiff$Date)
+panel_datadiff <- pdata.frame(panelALLdiff, index = c("Country", "Date"))
+colnames(panel_datadiff) <- gsub("\\.", "", colnames(panel_datadiff))
+```
+
+```{r}
+colnames(panel_datadiff)
+```
+
+```{r}
+panelmodelcolumnsdiff <- c(
+  "Date", "TradeFreedom", 
+  "DebtGDP", "Zscore", "EPU", "USExportWeight", "iMAPPAttitude", 
+  "MacrobondBC", "Sentiment", "M1Reserves", "FDIGDP", "ForeignReservesGDP", "Cooperation", 
+  "Corndog", "USTradePolicyEPU", "VIX", "USRecessionProbability", "OilPrice", 
+  "USiMAPPAttitude", "Country", "PCI", "TO", "TO_lag1", "TO_lag2", "PCI_lag1", "PCI_lag2", "TO_diff", "PCI_diff", "TO_difflag1", "PCI_difflag1"
+)
+
+
+panel_subsetdiff <- panel_data[panelmodelcolumnsdiff]
+```
+
+```{r}
+colnames(panel_subsetdiff)
+```
+
+#### Haussman Test for Fixed Effects
+
+```{r}
+fixeddiff <- plm(
+  TO_diff ~ TO_difflag1 + TradeFreedom + EPU + Zscore,
+  data = panel_subsetdiff,
+  model = "within"
+)
+
+summary(fixeddiff)
+```
+
+```{r}
+randomdiff <- plm(
+  TO_diff ~ TO_difflag1 + TradeFreedom + EPU + Zscore,
+  data = panel_subsetdiff,
+  model = "random"
+)
+
+summary(randomdiff)
+```
+
+```{r}
+hausman_resultdiff <- phtest(fixeddiff, randomdiff)
+print(hausman_resultdiff)
+```
+
+#### Panel Model
+
+```{r}
+PTd <- plm(
+  TO_diff ~ TO_difflag1 + TradeFreedom + DebtGDP + Zscore + EPU + iMAPPAttitude + MacrobondBC + M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice,
+  data = panel_subsetdiff,
+  model = "within"
+)
+
+summary(PTd)
+```
+
+
+```{r}
+stargazer(UTd, FTd, GTd, MTd, JTd, ATd, PTd, type = "latex", style = "aer")
+```
+# PCI regressions
+
+## RAW
+
+### ADF tests
+
+```{r}
+adf_UK <- adf.test(UK$PCI, alternative = "stationary")
+adf_Australia <- adf.test(Australia$PCI, alternative = "stationary")
+adf_Japan <- adf.test(Japan$PCI, alternative = "stationary")
+adf_France <- adf.test(France$PCI, alternative = "stationary")
+adf_Germany <- adf.test(Germany$PCI, alternative = "stationary")
+adf_Mexico <- adf.test(Mexico$PCI, alternative = "stationary")
+adf_UK
+adf_Australia
+adf_Japan
+adf_France
+adf_Germany
+adf_Mexico
+```
+
+### UK
+
+```{r}
+colnames(UK)
+```
+
+#### with corndog
+
+```{r}
+UPc <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = UK)
+
+residuals <- residuals(UPc)
+summary(UPc)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+#### Without corndog
+
+```{r}
+UP <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = UK)
+
+residuals <- residuals(UP)
+summary(UP)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### France
+
+#### with corndog
+
+```{r}
+FPc <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude + MacrobondBC,
+                data = France)
+
+residuals <- residuals(FPc)
+summary(FPc)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+#### without corndog
+
+```{r}
+FP <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + iMAPPAttitude + USiMAPPAttitude + MacrobondBC,
+                data = France)
+
+residuals <- residuals(FP)
+summary(FP)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Germany
+
+#### with corndog
+
+```{r}
+GPc <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Germany)
+
+residuals <- residuals(GPc)
+summary(GPc)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Without corndog
+
+```{r}
+GP <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Germany)
+
+residuals <- residuals(GP)
+summary(GP)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Japan
+
+#### with corndog
+
+```{r}
+JPc <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + MacrobondBC+  Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Japan)
+
+residuals <- residuals(JPc)
+summary(JPc)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+#### without corndog
+
+```{r}
+JP <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + MacrobondBC + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Japan)
+
+residuals <- residuals(JP)
+summary(JP)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Mexico
+
+#### with corndog
+
+```{r}
+MPc <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + MacrobondBC+ Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Mexico)
+
+residuals <- residuals(MPc)
+summary(MPc)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+#### without corndog
+
+```{r}
+MP <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + MacrobondBC + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Mexico)
+
+residuals <- residuals(MP)
+summary(MP)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Australia
+
+#### with corndog
+
+```{r}
+APc <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + MacrobondBC+ VIX + OilPrice + Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Australia)
+
+residuals <- residuals(APc)
+summary(APc)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+#### without corndog
+
+```{r}
+AP <- lm(PCI ~ PCI_lag1 + USExportWeight + USTradePolicyEPU + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + MacrobondBC+ VIX + OilPrice + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Australia)
+
+residuals <- residuals(AP)
+summary(AP)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+### Panel Regression
+
+#### Haussman Test for Fixed Effects
+
+```{r}
+fixed <- plm(
+  PCI ~ PCI_lag1 + TradeFreedom + EPU + Zscore,
+  data = panel_subset,
+  model = "within"
+)
+
+summary(fixed)
+```
+
+```{r}
+random <- plm(
+  PCI ~ PCI_lag1 + TradeFreedom + EPU + Zscore,
+  data = panel_subset,
+  model = "random"
+)
+
+summary(random)
+```
+
+```{r}
+hausman_result <- phtest(fixed, random)
+print(hausman_result)
+```
+
+#### Panel Model
+##### with corndog
+```{r}
+ppc <- plm(
+  PCI ~ PCI_lag1 + USExportWeight + iMAPPAttitude + MacrobondBC + M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + USTradePolicyEPU + USRecessionProbability + USiMAPPAttitude,
+  data = panel_subset,
+  model = "within"
+)
+
+summary(ppc)
+```
+##### without corndog
+```{r}
+pp <- plm(
+  PCI ~ PCI_lag1 + USExportWeight + iMAPPAttitude + MacrobondBC + M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + USTradePolicyEPU + USiMAPPAttitude + USRecessionProbability,
+  data = panel_subset,
+  model = "within"
+)
+
+summary(pp)
+```
+
+
+### With corndog
+```{r}
+stargazer(UPc, FPc, GPc, JPc, MPc, APc, ppc, type = "latex", style = "aer")
+```
+
+### without
+```{r}
+stargazer(UP, FP, GP, JP, MP, AP, pp, type = "latex", style = "aer")
+```
+
+
+
+##First Differenced 
+### ADF tests
+
+```{r}
+UKadf <- UK %>%
+  dplyr::filter(!is.na(PCI_diff))
+
+# Australia
+Australiaadf <- Australia %>%
+  dplyr::filter(!is.na(PCI_diff))
+
+# Japan
+Japanadf <- Japan %>%
+  dplyr::filter(!is.na(PCI_diff))
+
+# France
+Franceadf <- France %>%
+  dplyr::filter(!is.na(PCI_diff))
+
+# Germany
+Germanyadf <- Germany %>%
+  dplyr::filter(!is.na(PCI_diff))
+
+# Mexico
+Mexicoadf <- Mexico %>%
+  dplyr::filter(!is.na(PCI_diff))
+
+adf_UK <- adf.test(UKadf$PCI_diff, alternative = "stationary")
+adf_Australia <- adf.test(Australiaadf$PCI_diff, alternative = "stationary")
+adf_Japan <- adf.test(Japanadf$PCI_diff, alternative = "stationary")
+adf_France <- adf.test(Franceadf$PCI_diff, alternative = "stationary")
+adf_Germany <- adf.test(Germanyadf$PCI_diff, alternative = "stationary")
+adf_Mexico <- adf.test(Mexicoadf$PCI_diff, alternative = "stationary")
+adf_UK
+adf_Australia
+adf_Japan
+adf_France
+adf_Germany
+adf_Mexico
+```
+
+
+### UK
+
+```{r}
+colnames(UK)
+```
+
+```{r}
+UPd <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = UK)
+
+residuals <- residuals(UPd)
+summary(UPd)
+```
+
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+### France
+
+```{r}
+FPd <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = France)
+
+residuals <- residuals(FPd)
+summary(FPd)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+### Germany
+
+```{r}
+GPd <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Germany)
+
+residuals <- residuals(GPd)
+summary(GPd)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+### Japan
+
+```{r}
+JPd <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Japan)
+
+residuals <- residuals(JPd)
+summary(JPd)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+### Mexico
+
+```{r}
+MPd <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Mexico)
+
+residuals <- residuals(MPd)
+summary(MPd)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+
+### Australia
+
+```{r}
+APd <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Australia)
+
+residuals <- residuals(APd)
+summary(APd)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+### Panel Regression
+
+#### Haussman Test for Fixed Effects
+
+```{r}
+fixeddiff <- plm(
+  PCI_diff ~ PCI_difflag1 + TradeFreedom + EPU + Zscore,
+  data = panel_subsetdiff,
+  model = "within"
+)
+
+summary(fixeddiff)
+```
+
+```{r}
+randomdiff <- plm(
+  PCI_diff ~ PCI_difflag1 + TradeFreedom + EPU + Zscore,
+  data = panel_subsetdiff,
+  model = "random"
+)
+
+summary(randomdiff)
+```
+
+```{r}
+hausman_result <- phtest(fixeddiff, randomdiff)
+print(hausman_result)
+```
+
+#### Panel Model
+
+```{r}
+PPd <- plm(
+  PCI_diff ~ PCI_difflag1 + USExportWeight + TradeFreedom + DebtGDP + Zscore + EPU + iMAPPAttitude + MacrobondBC + M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Corndog + Cooperation + USTradePolicyEPU + USRecessionProbability + USiMAPPAttitude,
+  data = panel_subsetdiff,
+  model = "within"
+)
+
+summary(PPd)
+```
+
+```{r}
+stargazer(UPd, FPd, GPd, JPd, MPd, APd, PPd, type = "latex", style = "aer")
+```
+
+
+# PCI no corndog first differenced
+
+```{r}
+UPdc <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = UK)
+
+residuals <- residuals(UPdc)
+summary(UPdc)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+### France
+
+```{r}
+FPdc <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = France)
+
+residuals <- residuals(FPdc)
+summary(FPdc)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+### Germany
+
+```{r}
+GPdc <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Germany)
+
+residuals <- residuals(GPdc)
+summary(GPdc)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+### Japan
+
+```{r}
+JPdc <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Japan)
+
+residuals <- residuals(JPdc)
+summary(JPdc)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+### Mexico
+
+```{r}
+MPdc <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Mexico)
+
+residuals <- residuals(MPdc)
+summary(MPdc)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+
+### Australia
+
+```{r}
+APdc <- lm(PCI_diff ~ PCI_difflag1 + USExportWeight + USTradePolicyEPU + TradeFreedom + DebtGDP + Zscore + EPU + MacrobondBC + USRecessionProbability + 
+                M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + iMAPPAttitude + USiMAPPAttitude,
+                data = Australia)
+
+residuals <- residuals(APdc)
+summary(APdc)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+
+
+### Panel Regression
+
+#### Haussman Test for Fixed Effects
+
+```{r}
+fixeddiff <- plm(
+  PCI_diff ~ PCI_difflag1 + TradeFreedom + EPU + Zscore,
+  data = panel_subsetdiff,
+  model = "within"
+)
+
+summary(fixeddiff)
+```
+
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+```{r}
+randomdiff <- plm(
+  PCI_diff ~ PCI_difflag1 + TradeFreedom + EPU + Zscore,
+  data = panel_subsetdiff,
+  model = "random"
+)
+
+summary(randomdiff)
+```
+
+```{r}
+hausman_result <- phtest(fixeddiff, randomdiff)
+print(hausman_result)
+```
+
+#### Panel Model
+
+```{r}
+PPdc <- plm(
+  PCI_diff ~ PCI_difflag1 + USExportWeight + TradeFreedom + DebtGDP + Zscore + EPU + iMAPPAttitude + MacrobondBC + M1Reserves + FDIGDP + ForeignReservesGDP + VIX + OilPrice + Cooperation + USTradePolicyEPU + USRecessionProbability + USiMAPPAttitude,
+  data = panel_subsetdiff,
+  model = "within"
+)
+
+
+
+summary(PPdc)
+```
+
+```{r}
+stargazer(UPdc, FPdc, GPdc, JPdc, MPdc, APdc, PPdc, type = "latex", style = "aer")
+```
