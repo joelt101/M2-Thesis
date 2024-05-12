@@ -1,0 +1,40 @@
+WITH RelevantArticles AS (
+  SELECT
+    DATE(PARSE_TIMESTAMP('%Y%m%d%H%M%S', SUBSTR(GKGRECORDID, 1, 14))) AS Date,
+    CASE 
+      WHEN REGEXP_CONTAINS(V2Locations, r'United Kingdom') THEN 'UK'
+      WHEN REGEXP_CONTAINS(V2Locations, r'Japan') THEN 'Japan'
+      WHEN REGEXP_CONTAINS(V2Locations, r'Germany') THEN 'Germany'
+      WHEN REGEXP_CONTAINS(V2Locations, r'France') THEN 'France'
+      WHEN REGEXP_CONTAINS(V2Locations, r'Australia') THEN 'Australia'
+      WHEN REGEXP_CONTAINS(V2Locations, r'Mexico') THEN 'Mexico'
+      ELSE NULL
+    END AS Country,
+    REGEXP_CONTAINS(LOWER(ALLNAMES), r'\b(usa)\b|\b(united states of america)\b|\b( united states)\b|\b(chicago)\b|\b(wall street)\b|\b(silicon valley)\b|\b(alabama)\b|\b(alaska)\b|\b(arizona)\b|\b(arkansas)\b|\b(california)\b|\b(colorado)\b|\b(connecticut)\b|\b(delaware)\b|\b(florida)\b|\b(georgia)\b|\b(hawaii)\b|\b(idaho)\b|\b(illinois)\b|\b(indiana)\b|\b(iowa)\b|\b(kansas)\b|\b(kentucky)\b|\b(louisiana)\b|\b(maine)\b|\b(maryland)\b|\b(massachusetts)\b|\b(michigan)\b|\b(minnesota)\b|\b(mississippi)\b|\b(missouri)\b|\b(montana)\b|\b(nebraska)\b|\b(nevada)\b|\b(new hampshire)\b|\b(new jersey)\b|\b(new york)\b|\b(north carolina)\b|\b(north dakota)\b|\b(ohio)\b|\b(oklahoma)\b|\b(oregon)\b|\b(pennsylvania)\b|\b(rhode island)\b|\b(south carolina)\b|\b(south dakota)\b|\b(tenessee)\b|\b(texas)\b|\b(utah)\b|\b(vermont)\b|\b(virginia)\b|\b(washington)\b|\b(west virginia)\b|\b(wisconsin)\b|\b(wyoming)\b|\b(fed funds rate)\b|\b(jerome powell)\b|\b(janet yellen)\b|\b(ben bernanke)\b|\b(alan greenspan)\b|\b(paul volcker)\b|\b(william miller)\b|\b(arthur burns)\b|\b(g. william miller)\b|\b(marriner eccles)\b|\b(george washington)\b|\b(john adams)\b|\b(thomas jefferson)\b|\b(james madison)\b|\b(james monroe)\b|\b(john quincy adams)\b|\b(andrew jackson)\b|\b(martin van buren)\b|\b(william henry harrison)\b|\b(john tyler)\b|\b(james k. polk)\b|\b(zachary taylor)\b|\b(millard fillmore)\b|\b(franklin pierce)\b|\b(james buchanan)\b|\b(abraham lincoln)\b|\b(andrew johnson)\b|\b(ulysses s. grant)\b|\b(rutherford b. hayes)\b|\b(james garfield)\b|\b(chester arthur)\b|\b(grover cleveland)\b|\b(benjamin harrison)\b|\b(william mckinley)\b|\b(theodore roosevelt)\b|\b(william howard taft)\b|\b(woodrow wilson)\b|\b(warren g. harding)\b|\b(calvin coolidge)\b|\b(herbert hoover)\b|\b(franklin d. roosevelt)\b|\b(harry s. truman)\b|\b(dwight d. eisenhower)\b|\b(john f. kennedy)\b|\b(lyndon b. johnson)\b|\b(richard nixon)\b|\b(gerald ford)\b|\b(jimmy carter)\b|\b(ronald reagan)\b|\b(george h. w. bush)\b|\b(bill clinton)\b|\b(george w. bush)\b|\b(barack obama)\b|\b(donald trump)\b|\b(joe biden)\b|\b(dodd-frank act)\b|\b(sarbanes-oxley act)\b|\b(glass-steagall act)\b|\b(jobs act)\b|\b(smoot-hawley tariff act)\b|\b(affordable care act)\b|\b(nancy pelosi)\b|\b(mitch mcconnell)\b|\b(chuck schumer)\b|\b(kevin mccarthy)\b|\b(john mccain)\b|\b(ted kennedy)\b|\b(paul ryan)\b|\b(orin hatch)\b|\b(elizabeth warren)\b|\b(bernie sanders)\b|\b(alexandria ocasio-cortez)\b|\b(general motors)\b|\b(exxonmobil)\b|\b(chevron)\b|\b(at&t)\b|\b(cvs health)\b|\b(berkshire hathaway)\b|\b(apple inc.)\b|\b(microsoft)\b|\b(google)\b|\b(amazon)\b|\b(facebook)\b|\b(tim cook)\b|\b(jeff bezos)\b|\b(satya nadella)\b|\b(sundar pichai)\b|\b(mark zuckerberg)\b|\b(elon musk)\b|\b(mary barra)\b|\b(jamie dimon)\b|\b(warren buffett)\b|\b(lloyd blankfein)\b|\b(indra nooyi)\b|\b(ginni rometty)\b|\b(ray dalio)\b|\b(david tepper)\b|\b(bill ackman)\b|\b(ken griffin)\b|\b(steve cohen)\b|\b(george soros)\b|\b(dan loeb)\b|\b(jim simons)\b|\b(john paulson)\b|\b(bruce kovner)\b|\b(oracle)\b|\b(netflix)\b|\b(linkedin)\b|\b(twitter)\b|\b(snapchat)\b|\b(uber)\b|\b(lyft)\b|\b(adobe)\b|\b(nvidia)\b|\b(tesla motors)\b|\b(space x)\b|\b(boston dynamics)\b|\b(intuit)\b|\b(palantir technologies)\b|\b(zoom video communications)\b|\b(dollar shave club)\b|\b(modern meadow)\b|\b(impossible foods)\b|\b(general electric)\b|\b(duke energy)\b|\b(fed funds)\b|\b(t bill)\b|\b(t-bill)\b|\b(NYSE)\b|\b(new york stock exchange)\b|\b(chicago stock exchange)\b|\b(chicago fed)\b|\b(securities and exchange comission)\b|\b(sec)\b|\b(dow jones industrial average)\b|\b(nasdaq composite)\b|\b(s&p 500)\b|\b(nyse american)\b|\b(russell 2000)\b|\b(wilshire 5000)\b|\b(nonfarm payrolls)\b|\b(consumer price index)\b|\b(producer price index)\b|\b(adp employment report)\b|\b(bureau of economic analysis)\b|\b(bureau of labor statistics)\b|\b(treasury department)\b|\b(internal revenue service)\b|\b(commodity futures trading commission)\b|\b(federal trade commission)\b|\b(office of the comptroller of the currency)\b|\b(t-bills)\b|\b(t-notes)\b|\b(t-bonds)\b|\b(municipal bonds)\b|\b(jumbo loans)\b|\b(fannie mae)\b|\b(freddie mac)\b|\b(ginnie mae)\b|\b(federal home loan banks)\b|\b(federal farm credit banks)\b|\b(federal deposit insurance corporation)\b|\b(savings and loan crisis)\b|\b(credit union)\b|\b(roth ira)\b|\b(401(k) plans)\b|\b(529 plan)\b|\b(amt)\b|\b(estate tax)\b|\b(gift tax)\b|\b(great recession)\b|\b(savings and loan crisis)\b|\b(black monday)\b|\b(dot-com bubble)\b|\b(subprime mortgage crisis)\b|\b(american stock exchange)\b|\b(black friday)\b|\b(cyber monday)\b|\b(greenback)\b|\b(petrodollar recycling)\b|\b(yankee bond)\b|\b(blue chip stocks)\b|\b(pink sheets)\b|\b(chapter 11 bankruptcy)\b|\b(chapter 7 bankruptcy)\b') AS HasMatchedTerm
+  FROM
+    `gdelt-bq.gdeltv2.gkg`
+  WHERE
+    GKGRECORDID BETWEEN '20000101000000-0' AND '20240401000000-0'
+    AND (
+      REGEXP_CONTAINS(V2Locations, r'United Kingdom') OR 
+      REGEXP_CONTAINS(V2Locations, r'Japan') OR 
+      REGEXP_CONTAINS(V2Locations, r'Germany') OR 
+      REGEXP_CONTAINS(V2Locations, r'France') OR 
+      REGEXP_CONTAINS(V2Locations, r'Australia') OR 
+      REGEXP_CONTAINS(V2Locations, r'Mexico')
+    )
+)
+
+SELECT
+  Date,
+  Country,
+  COUNTIF(HasMatchedTerm) AS ArticlesWithMatchedTerms,
+  COUNT(*) AS TotalArticles
+FROM
+  RelevantArticles
+WHERE
+  Country IS NOT NULL
+GROUP BY
+  Date, Country
+ORDER BY
+  Date, Country
