@@ -1,0 +1,2253 @@
+---
+title: "Cross Asset"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Loading Required Packages
+
+```{r}
+library(betareg)
+library(car)
+library(ConnectednessApproach)
+library(dplyr)
+library(extrafont)
+library(factoextra)
+library(forecast)
+library(ggplot2)
+library(kableExtra)
+library(knitr)
+library(lubridate)
+library(moments)
+library(patchwork)
+library(RColorBrewer)
+library(readr)
+library(readxl)
+library(reshape2)
+library(stargazer)
+library(stats)
+library(tibble)
+library(tidyr)
+library(tidyverse)
+library(tseries)
+library(urca)
+library(vars)
+library(vtable)
+library(openxlsx)
+library(xtable)
+library(zoo)
+
+```
+
+# US Cross-Asset Spillovers
+
+## Loading Data
+
+```{r}
+data <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/logvol.xlsx")
+#ordering by date + making excel the zoo
+logvol <- zoo(data[, -1], order.by = as.Date(data$Date))
+#this code removes any observations before 2001-11-15 (where I am missing observations for some time series)
+logvol <- logvol[index(logvol) >= as.Date("2001-11-15")]
+#this line fills the missing observations with last observation carried forward.
+logvol <- na.locf(logvol)
+logvol_df <- as.data.frame(logvol)
+logvol_df$Date <- index(logvol)
+logvol_df <- logvol_df[, c(ncol(logvol_df), 1:(ncol(logvol_df)-1))]
+#write.xlsx(logvol_df, file = "/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/logvol2.xlsx")
+
+#creating a long for ggplot
+logvol_long <- pivot_longer(logvol_df, cols = c(GSPC_logvol, USDX_logvol, TNX_logvol, BCOM_logvol), 
+                            names_to = "Variable", values_to = "LogVol")
+logvol_long$Variable <- factor(logvol_long$Variable,
+                               levels = c("USDX_logvol", "TNX_logvol", "GSPC_logvol", "BCOM_logvol"),
+                               labels = c("FOREX", "Bonds", "Stocks", "Commodities"))
+
+```
+
+```{r}
+data2 <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/justvolatilities.xlsx")
+#ordering by date + making excel the zoo
+vol <- zoo(data2[, -1], order.by = as.Date(data2$Date))
+#this code removes any observations before 2001-11-15 (where I am missing observations for some time series)
+vol <- vol[index(vol) >= as.Date("2001-11-15")]
+#this line fills the missing observations with last observation carried forward.
+vol <- na.locf(vol)
+vol_df <- as.data.frame(vol)
+vol_df$Date <- index(vol)
+vol_df <- vol_df[, c(ncol(vol_df), 1:(ncol(vol_df)-1))]
+#write.xlsx(logvol_df, file = "/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/logvol2.xlsx")
+
+#creating a long for ggplot
+vol_long <- pivot_longer(vol_df, cols = c(GSPC_vol, USDX_vol, TNX_vol, BCOM_vol), 
+                            names_to = "Variable", values_to = "vol")
+vol_long$Variable <- factor(vol_long$Variable,
+                               levels = c("USDX_vol", "TNX_vol", "GSPC_vol", "BCOM_vol"),
+                               labels = c("FOREX", "Bonds", "Stocks", "Commodities"))
+
+
+```
+
+## Summary Statistics
+
+```{r}
+compute_summary <- function(data_column) {
+    data_clean <- na.omit(data_column)
+    mean_val <- mean(data_clean)
+    sd_val <- sd(data_clean)
+    min_val <- min(data_clean)
+    max_val <- max(data_clean)
+    skew_val <- skewness(data_clean)
+    kurt_val <- kurtosis(data_clean)
+    
+    return(c(mean_val, sd_val, min_val, max_val, skew_val, kurt_val))
+}
+```
+
+```{r}
+summary <- SummaryStatistics(logvol)
+summary
+```
+```{r}
+summary <- SummaryStatistics(vol)
+summary
+```
+
+```{r}
+stargazer(vol, type = "latex", summary = TRUE, digits = 10)
+```
+```{r}
+GSPCskewness <- skewness(vol_df$GSPC_vol)
+BCOMskewness <- skewness(vol_df$BCOM_vol)
+TNXskewness <- skewness(vol_df$TNX_vol)
+USDXskewness <- skewness(vol_df$USDX_vol)
+
+
+
+print(GSPCskewness)
+print(BCOMskewness)
+print(TNXskewness)
+print(USDXskewness)
+
+```
+
+```{r}
+GSPCkurtosis <- kurtosis(vol_df$GSPC_vol)
+BCOMkurtosis <- kurtosis(vol_df$BCOM_vol)
+TNXkurtosis <- kurtosis(vol_df$TNX_vol)
+USDXkurtosis <- kurtosis(vol_df$USDX_vol)
+
+
+print(GSPCkurtosis)
+print(BCOMkurtosis)
+print(TNXkurtosis)
+print(USDXkurtosis)
+
+```
+
+
+
+```{r}
+relevant_columns <- colnames(logvol_df)[2:length(colnames(logvol_df))]  # because first column date
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(logvol_df[[col]])))
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE, digits = 6, title = "Summary statistics log  volatility")
+```
+
+
+```{r}
+relevant_columns <- colnames(vol_df)[2:length(colnames(vol_df))]
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(vol_df[[col]])))
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE, title = "Summary statistics volatility")
+```
+
+
+```{r}
+stargazer(logvol, summary = TRUE, type = "latex", title = "logvolatility summary", digits = 10)
+```
+
+```{r}
+#xtable(summary, caption = 'Summary Statistics')
+```
+
+## Correlation Matrix
+
+```{r}
+perform_adf_tests_forecast <- function(column_data) {
+    data_clean <- na.omit(column_data)
+
+    adf_none <- ur.df(data_clean, type = "none")
+    adf_none_stat <- adf_none@teststat[1]
+
+    adf_drift <- ur.df(data_clean, type = "drift")
+    adf_drift_stat <- adf_drift@teststat[1]
+
+    adf_trend <- ur.df(data_clean, type = "trend")
+    adf_trend_stat <- adf_trend@teststat[1]
+
+    adf_none_p <- pnorm(-abs(adf_none_stat))
+    adf_drift_p <- pnorm(-abs(adf_drift_stat))
+    adf_trend_p <- pnorm(-abs(adf_trend_stat))
+
+    return(c(adf_none_stat, adf_none_p, adf_drift_stat, adf_drift_p, adf_trend_stat, adf_trend_p))
+}
+
+
+
+
+```
+
+
+```{r}
+logvol2 <- logvol
+new_names <- c("Stocks", "Commodities", "Bonds", "FOREX")
+colnames(logvol2) <- new_names
+logvolcor = cor(logvol2)
+print(logvolcor)
+```
+
+```{r}
+
+logvolcor_long <- reshape2::melt(logvolcor)
+heatmaplogvol <- ggplot(logvolcor_long, aes(Var1, Var2, fill = value)) +
+  geom_tile() + 
+  geom_text(aes(label = sprintf("%.2f", value)), size = 5, color = "black", family = "Times New Roman") + 
+  scale_fill_gradient2(low = "white", high = "red", mid = "yellow", midpoint = 0, limit = c(-1,1), space = "Lab", name="Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, family = "Times New Roman"),
+        axis.text.y = element_text(family = "Times New Roman"),
+        axis.title.x = element_blank(), 
+        axis.title.y = element_blank())
+        #plot.title = element_text(family = "Times New Roman", face = "bold", size = 14, hjust = 0.5)) + 
+  labs(fill = "Correlation") 
+
+print(heatmaplogvol)
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/heatmaplogvol.png", heatmaplogvol, width = 10, height = 8, dpi = 300)
+```
+```{r}
+vol2 <- vol
+new_names <- c("Stocks", "Commodities", "Bonds", "FOREX")
+colnames(vol2) <- new_names
+volcor = cor(vol2)
+print(volcor)
+```
+
+
+
+```{r}
+
+volcor_long <- reshape2::melt(volcor)
+heatmapvol <- ggplot(volcor_long, aes(Var1, Var2, fill = value)) +
+  geom_tile() + 
+  geom_text(aes(label = sprintf("%.2f", value)), size = 5, color = "black", family = "Times New Roman") + 
+  scale_fill_gradient2(low = "white", high = "red", mid = "yellow", midpoint = 0, limit = c(-1,1), space = "Lab", name="Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, family = "Times New Roman"),
+        axis.text.y = element_text(family = "Times New Roman"),
+        axis.title.x = element_blank(), 
+        axis.title.y = element_blank())
+        #plot.title = element_text(family = "Times New Roman", face = "bold", size = 14, hjust = 0.5)) + 
+  labs(fill = "Correlation") 
+
+print(heatmapvol)
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/heatmapvol.png", heatmapvol, width = 10, height = 8, dpi = 300)
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(vol_df)[sapply(vol_df, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(vol_df[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results for plain volatility",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(logvol_df)[sapply(logvol_df, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(logvol_df[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results for log volatility",
+          rownames = FALSE,
+          digits = 4)
+```
+
+
+
+## Plotting the time series
+
+```{r}
+multiplot <- ggplot(logvol_long, aes(x = Date, y = LogVol, color = Variable)) +
+  geom_line(linewidth = 0.3, linetype = 'solid') +
+  xlab("") +
+  theme_bw(base_size = 20) +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 20),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    legend.position = "bottom",
+    legend.direction = "horizontal",
+    legend.box = "vertical", # Center the legend
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  ) +
+   scale_color_manual(values = c("FOREX" = "blue", "Bonds" = "red", "Stocks" = "green", "Commodities" = "purple"),
+                     name = "Variable") +
+  labs(y = "Log Volatility", color = "Variable")
+
+multiplot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/multiplot.png", plot = multiplot, width = 20, height = 15, dpi = 300)
+```
+
+```{r}
+plots <- list()
+variables <- unique(logvol_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = logvol_long[logvol_long$Variable == variables[i], ], aes(x = Date, y = LogVol)) +
+        geom_line(aes(color = Variable), linewidth = 0.1) +
+        scale_color_manual(values = c("FOREX" = "black", "Bonds" = "black", "Stocks" = "black", "Commodities" = "black")) +
+        labs(y = "Log Volatility", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'), 
+            axis.title.y = element_text(size = 7, face = 'bold'), 
+            axis.text = element_text(size = 10),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/logtimeseries.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+
+```
+
+```{r}
+plots <- list()
+variables <- unique(vol_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = vol_long[vol_long$Variable == variables[i], ], aes(x = Date, y = vol)) +
+        geom_line(aes(color = Variable), linewidth = 0.1) +
+        scale_color_manual(values = c("FOREX" = "black", "Bonds" = "black", "Stocks" = "black", "Commodities" = "black")) +
+        labs(y = "Log Volatility", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'), 
+            axis.title.y = element_text(size = 7, face = 'bold'), 
+            axis.text = element_text(size = 10),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/volatilitytimeseries.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+
+```
+
+
+## Renaming the columns
+
+```{r}
+logvol2 <- logvol
+new_names <- c("Stocks", "Commodities", "Bonds", "FOREX")
+colnames(logvol2) <- new_names
+```
+
+
+
+## ADF Test
+
+```{r}
+adf_stocks <- adf.test(logvol2$Stocks, alternative = "stationary")
+adf_bonds <- adf.test(logvol2$Bonds, alternative = "stationary")
+adf_forex <- adf.test(logvol2$FOREX, alternative = "stationary")
+adf_commodities <- adf.test(logvol2$Commodities, alternative = "stationary")
+adf_stocks
+adf_bonds
+adf_forex
+adf_commodities
+```
+
+
+## Selection of the order of the VAR model to enable calculation of the spillovers
+
+```{r}
+VARselect(logvol2,
+          lag.max = 15,
+          type = "none")
+```
+
+## Orthogonalised
+
+### Without rolling window
+
+```{r}
+dca = ConnectednessApproach(logvol2, 
+                            nlag=9, 
+                            nfore=10,
+                            corrected=TRUE,
+                            model="VAR",
+                            connectedness="Time",
+                            Connectedness_config=list(TimeConnectedness=list(generalized=FALSE)))
+```
+
+```{r}
+kable(dca$TABLE)
+```
+
+### with rolling window
+
+```{r}
+dca = ConnectednessApproach(logvol2, 
+                            nlag=9, 
+                            nfore=10,
+                            corrected=TRUE,
+                            window.size=200,
+                            model="VAR",
+                            connectedness="Time",
+                            Connectedness_config=list(TimeConnectedness=list(generalized=FALSE)))
+```
+
+```{r}
+kable(dca$TABLE)
+```
+
+## Generalised
+
+### Estimating the model WITHOUT the rolling window
+
+```{r}
+dca = ConnectednessApproach(logvol2, 
+                            nlag=9, 
+                            nfore=10,
+                            corrected=TRUE,
+                            model="VAR",
+                            connectedness="Time",
+                            Connectedness_config=list(TimeConnectedness=list(generalized=TRUE)))
+```
+
+```{r}
+kable(dca$TABLE)
+```
+
+### Now estimating the model with a 200 day rolling window.
+
+```{r}
+dca = ConnectednessApproach(logvol2, 
+                            nlag=9, 
+                            nfore=10,
+                            corrected=TRUE,
+                            window.size=200,
+                            model="VAR",
+                            connectedness="Time",
+                            Connectedness_config=list(TimeConnectedness=list(generalized=TRUE)))
+```
+
+### Spillover summary table
+
+```{r}
+stargazer(dca$TABLE, type = "latex")
+```
+
+
+## Exporting Spillovers as dataframes
+
+### Exporting the spillovers from 2 dimensional arrays
+
+```{r}
+TCI <- as.data.frame(dca[['TCI']])
+TO <- as.data.frame(dca[['TO']])
+FROM <- as.data.frame(dca[['FROM']])
+NET <- as.data.frame(dca[['NET']])
+```
+
+## Plotting TCI
+
+```{r}
+TCI <- TCI %>% rownames_to_column(var = "Date")
+TCI$Date <- as.Date(TCI$Date)
+```
+
+```{r}
+tci_plot <- ggplot(data = TCI, aes(x = Date, y = TCI)) +
+  geom_line(linewidth = 0.3, color = "black") +
+  labs(y = "Total Connectedness Index", title = "Figure : Dynamic Total Connectedness") +
+  theme_bw(base_size = 20) + 
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 5),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(tci_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/TCI.png", plot = tci_plot, width = 15, height = 10, dpi = 300)
+
+```
+
+## Plotting TO
+
+```{r}
+TO <- TO %>% rownames_to_column(var = "Date")
+TO$Date <- as.Date(TO$Date)
+
+to_long <- pivot_longer(TO, cols = c('Stocks', 'Commodities', 'FOREX', 'Bonds'), 
+                            names_to = "Variable", values_to = "TO")
+```
+
+```{r}
+plots <- list()
+variables <- unique(to_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = to_long[to_long$Variable == variables[i], ], aes(x = Date, y = TO)) +
+        geom_line(color = 'black', linewidth = 0.1) +
+        labs(y = "TO", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'),
+            axis.title.y = element_text(size = 7, face = 'bold'),
+            axis.text = element_text(size = 5),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/to.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+
+## Plotting FROM
+
+```{r}
+FROM <- FROM %>% rownames_to_column(var = "Date")
+FROM$Date <- as.Date(FROM$Date)
+
+from_long <- pivot_longer(FROM, cols = c('Stocks', 'Commodities', 'FOREX', 'Bonds'), 
+                            names_to = "Variable", values_to = "FROM")
+```
+
+```{r}
+plots <- list()
+variables <- unique(from_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = from_long[from_long$Variable == variables[i], ], aes(x = Date, y = FROM)) +
+        geom_line(color = 'black', linewidth = 0.1) +
+        labs(y = "FROM", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'), 
+            axis.title.y = element_text(size = 7, face = 'bold'), 
+            axis.text = element_text(size = 5),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/from.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+## NET
+```{r}
+NET <- NET %>% rownames_to_column(var = "Date")
+NET$Date <- as.Date(NET$Date)
+
+net_long <- pivot_longer(NET, cols = c('Stocks', 'Commodities', 'FOREX', 'Bonds'), 
+                            names_to = "Variable", values_to = "NET")
+```
+
+```{r}
+plots <- list()
+variables <- unique(net_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = net_long[net_long$Variable == variables[i], ], aes(x = Date, y = NET)) +
+        geom_line(color = 'black', linewidth = 0.1) +
+        labs(y = "NET", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'), 
+            axis.title.y = element_text(size = 7, face = 'bold'), 
+            axis.text = element_text(size = 5),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/NET.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+
+```
+
+
+
+## NPDC
+
+```{r}
+#defining datasaving function from ConnectednessApproach for plotting
+plotNPDC = function(dca, ca=NULL, path=NULL, ylim=c(NULL, NULL), selection=NULL, width=10, height=7, saveData=FALSE, ...) {
+  dataList = list()
+  namesList = list()
+  
+  if (!is.null(path)) {
+    if (!dir.exists(path)) {
+      dir.create(path)
+    }
+  }
+  if (length(ca)>0 && !is.null(ca$config$approach)) {
+    ca = list(ca)
+  }
+  x = dca$NPDC
+  if (is.null(x)) {
+    stop(paste(ca$config$approach, "has no NPDC."))
+  }
+  date = as.Date(dimnames(x)[[3]])
+  t = length(date)
+  k = ncol(x)
+  NAMES = colnames(x)
+  if (is.null(NAMES)) {
+    NAMES = 1:k
+  }
+  lower = ylim[1]
+  upper = ylim[2]
+
+  kk = k*(k-1)/2
+  oldpar = par(no.readonly=TRUE)
+  on.exit(par(oldpar))
+  if (!is.null(path)) pdf(file=paste0(path, "/NPDC.pdf"), width=width, height=height)
+
+  for (j in 1:k) {
+    for (i in 1:k) {
+      if (i > j) {
+        if (i == selection || j == selection || is.null(selection)) {
+          x_ij = x[i, j, ]
+          seriesName = paste(NAMES[j], "-", NAMES[i], sep = "")
+          namesList[[length(namesList) + 1]] = seriesName
+          df = data.frame(Date = date, Y = x_ij)
+          colnames(df)[2] = seriesName
+          dataList[[length(dataList) + 1]] = df
+
+        
+          if (!is.null(ca)) {
+            for (il in 1:length(ca)) {
+              seriesName_ca = paste(seriesName, "_Comparison", il, sep = "")
+              namesList[[length(namesList) + 1]] = seriesName_ca
+              caData = ca[[il]]$NPDC[i, j, ]
+              df_ca = data.frame(Date = date, Y = caData)
+              colnames(df_ca)[2] = seriesName_ca
+              dataList[[length(dataList) + 1]] = df_ca
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!is.null(path)) dev.off()
+
+  if (saveData) {
+    combinedData = Reduce(function(...) merge(..., by = "Date", all = TRUE), dataList)
+    return(combinedData)
+  }
+}
+
+```
+
+```{r}
+NPDC <- plotNPDC(dca, saveData = TRUE)
+#rownames(NPDC) <- NPDC$Date
+#NPDC$Date <- NULL
+```
+
+```{r}
+npdc_long <- pivot_longer(NPDC, cols = c('Stocks-Commodities', 'Stocks-Bonds', 'Stocks-FOREX', 'Commodities-Bonds', 'Commodities-FOREX', 'Bonds-FOREX'), 
+                            names_to = "Variable", values_to = "NPDC")
+
+```
+
+```{r}
+variables <- unique(npdc_long$Variable)
+plots <- list()
+
+for (i in seq_along(variables)) {
+  plots[[i]] <- ggplot(data = npdc_long %>% filter(Variable == variables[i]), aes(x = Date, y = NPDC)) +
+    geom_line(linewidth = 0.1, color = "black") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    scale_color_manual(values = rep("solid", length(variables))) +
+    labs(y = "Net Connectedness", title = variables[i]) +
+    theme_bw(base_size = 20) + 
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7),
+      axis.title.y = element_text(size = 7),
+      axis.text = element_text(size = 5),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+n_cols <- ceiling(sqrt(length(variables)))
+n_rows <- ceiling(length(variables) / n_cols)
+
+combined_plot <- wrap_plots(plots, ncol = n_cols) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/npdc.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+
+## PCI
+
+```{r}
+plotPCI = function(dca, ca=NULL, path=NULL, ylim=c(NULL, NULL), selection=NULL, width=10, height=7, saveData=FALSE, ...) {
+  dataList = list() 
+  namesList = list()
+
+  if (!is.null(path)) {
+    if (!dir.exists(path)) {
+      dir.create(path)
+    }
+  }
+  if (length(ca)>0 && !is.null(ca$config$approach)) {
+    ca = list(ca)
+  }
+  x = dca$PCI
+  if (is.null(x)) {
+    stop(paste(dca$config$approach, "has no PCI."))
+  }
+  date = as.Date(dimnames(x)[[3]])
+  t = length(date)
+  k = ncol(x)
+  NAMES = colnames(x)
+  if (is.null(NAMES)) {
+    NAMES = 1:k
+  }
+  lower = ylim[1]
+  upper = ylim[2]
+
+  x[which(x >= 99.99999, arr.ind = TRUE)] = 0
+
+  if (!is.null(path)) pdf(file=paste0(path, "/PCI.pdf"), width=width, height=height)
+
+  for (j in 1:k) {
+    for (i in 1:k) {
+      if (i > j) {
+        if (i == selection || j == selection || is.null(selection)) {
+          x_ij = x[i, j, ]
+          seriesName = paste(NAMES[j], "-", NAMES[i], sep = "")
+          namesList[[length(namesList) + 1]] = seriesName
+          df = data.frame(Date = date, Y = x_ij)
+          colnames(df)[2] = seriesName
+          dataList[[length(dataList) + 1]] = df
+
+          if (!is.null(ca)) {
+            for (il in 1:length(ca)) {
+              seriesName_ca = paste(seriesName, "_Comparison", il, sep = "")
+              namesList[[length(namesList) + 1]] = seriesName_ca
+              caData = ca[[il]]$PCI[i, j, ]
+              df_ca = data.frame(Date = date, Y = caData)
+              colnames(df_ca)[2] = seriesName_ca
+              dataList[[length(dataList) + 1]] = df_ca
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!is.null(path)) dev.off()
+
+  if (saveData) {
+    combinedData = Reduce(function(...) merge(..., by = "Date", all = TRUE), dataList)
+    return(combinedData)
+  }
+}
+
+```
+
+```{r}
+PCI <- plotPCI(dca, saveData = TRUE)
+#rownames(PCI) <- PCI$Date
+#PCI$Date <- NULL
+```
+
+```{r}
+pci_long <- pivot_longer(PCI, cols = c('Stocks-Commodities', 'Stocks-Bonds', 'Stocks-FOREX', 'Commodities-Bonds', 'Commodities-FOREX', 'Bonds-FOREX'), 
+                            names_to = "Variable", values_to = "PCI")
+```
+
+```{r}
+variables <- unique(pci_long$Variable)
+plots <- list()
+
+for (i in seq_along(variables)) {
+  plots[[i]] <- ggplot(data = pci_long %>% filter(Variable == variables[i]), aes(x = Date, y = PCI)) +
+    geom_line(linewidth = 0.1, color = "black") +
+    scale_color_manual(values = rep("solid", length(variables))) +
+    labs(y = "Net Connectedness", title = variables[i]) +
+    theme_bw(base_size = 20) + 
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7),
+      axis.title.y = element_text(size = 7),
+      axis.text = element_text(size = 5),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+n_cols <- ceiling(sqrt(length(variables)))
+n_rows <- ceiling(length(variables) / n_cols)
+
+combined_plot <- wrap_plots(plots, ncol = n_cols) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/PCI.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+
+## Monthly Averages
+
+### TCI
+
+```{r}
+TCIm <- TCI %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+    TCI = mean(TCI, na.rm = TRUE),
+  ) %>%
+  ungroup()
+```
+
+
+#### Plotting Monthly
+```{r}
+tcim_plot <- ggplot(data = TCIm, aes(x = Date, y = TCI)) +
+  geom_line(linewidth = 0.3, color = "black") +
+  labs(y = "Total Connectedness Index") +
+  theme_bw(base_size = 20) + 
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(tcim_plot)
+print(tci_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/TCIm.png", plot = tcim_plot, width = 15, height = 10, dpi = 300)
+
+```
+
+### TO
+
+```{r}
+TO$Date <- as.Date(TO$Date)
+
+TOm <- TO %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+    Stocks = mean(Stocks, na.rm = TRUE),
+    Commodities = mean(Commodities, na.rm = TRUE),
+    Bonds = mean(Bonds, na.rm = TRUE),
+    FOREX = mean(FOREX, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+```
+
+#### Plotting Monthly
+```{r}
+#TOm <- TO %>% rownames_to_column(var = "Date")
+#TO$Date <- as.Date(TO$Date)
+
+tom_long <- pivot_longer(TOm, cols = c('Stocks', 'Commodities', 'FOREX', 'Bonds'), 
+                            names_to = "Variable", values_to = "TO")
+
+
+plots <- list()
+variables <- unique(tom_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = tom_long[tom_long$Variable == variables[i], ], aes(x = Date, y = TO)) +
+        geom_line(color = 'black', linewidth = 0.1) +
+        labs(y = "TO", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'),
+            axis.title.y = element_text(size = 7, face = 'bold'),
+            axis.text = element_text(size = 10),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/tom.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+### FROM
+
+```{r}
+FROMm <- FROM %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+    Stocks = mean(Stocks, na.rm = TRUE),
+    Commodities = mean(Commodities, na.rm=TRUE),
+    FOREX = mean(FOREX, na.rm=TRUE),
+    Bonds = mean(Bonds, na.rm=TRUE)
+  ) %>%
+  ungroup()
+```
+
+#### Plotting Monthly
+```{r}
+fromm_long <- pivot_longer(FROMm, cols = c('Stocks', 'Commodities', 'FOREX', 'Bonds'), 
+                            names_to = "Variable", values_to = "FROM")
+
+plots <- list()
+variables <- unique(fromm_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = fromm_long[fromm_long$Variable == variables[i], ], aes(x = Date, y = FROM)) +
+        geom_line(color = 'black', linewidth = 0.1) +
+        labs(y = "FROM", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'), 
+            axis.title.y = element_text(size = 7, face = 'bold'), 
+            axis.text = element_text(size = 10),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/fromm.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+### NET
+
+```{r}
+NET$Date <- as.Date(NET$Date)
+
+NETm <- NET %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+    Stocks = mean(Stocks, na.rm = TRUE),
+    Commodities = mean(Commodities, na.rm = TRUE),
+    Bonds = mean(Bonds, na.rm = TRUE),
+    FOREX = mean(FOREX, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+```
+
+#### Plotting Monthly
+```{r}
+netm_long <- pivot_longer(NETm, cols = c('Stocks', 'Commodities', 'FOREX', 'Bonds'), 
+                            names_to = "Variable", values_to = "NET")
+netm_long$NET <- netm_long$NET * -1
+
+plots <- list()
+variables <- unique(netm_long$Variable)
+
+for (i in 1:length(variables)) {
+    plots[[i]] <- ggplot(data = netm_long[netm_long$Variable == variables[i], ], aes(x = Date, y = NET)) +
+        geom_line(color = 'black', linewidth = 0.1) +
+        geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+        labs(y = "NET", title = variables[i]) +
+        theme_bw(base_size = 20) + 
+        theme(
+            text = element_text(family = "Times New Roman"),
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+            axis.title.x = element_text(size = 7, face = 'bold'),
+            axis.title.y = element_text(size = 7, face = 'bold'),
+            axis.text = element_text(size = 10),
+            legend.position = "none",
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.ticks = element_line(color = 'black')
+        )
+}
+
+combined_plot <- (plots[[1]] | plots[[2]]) / (plots[[3]] | plots[[4]]) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/netm.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+### NPDC
+
+```{r}
+NPDCm <- FROM %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+    'Stocks-Commodities' = mean(Stocks-Commodities, na.rm = TRUE),
+    'Stocks-Bonds' = mean(Stocks-Bonds, na.rm=TRUE),
+    'Stocks-FOREX' = mean(Stocks-FOREX, na.rm=TRUE),
+    'Commodities-Bonds' = mean(Commodities-Bonds, na.rm=TRUE),
+    'Commodities-FOREX' = mean(Commodities-FOREX, na.rm=TRUE),
+    'Bonds-FOREX' = mean(Bonds-FOREX, na.rm=TRUE)
+  ) %>%
+  ungroup()
+```
+
+
+```{r}
+NPDC <- plotNPDC(dca, saveData = TRUE)
+#rownames(NPDC) <- NPDC$Date
+#NPDC$Date <- NULL
+```
+
+#### Plotting Monthly
+```{r}
+npdcm_long <- pivot_longer(NPDCm, cols = c('Stocks-Commodities', 'Stocks-Bonds', 'Stocks-FOREX', 'Commodities-Bonds', 'Commodities-FOREX', 'Bonds-FOREX'), 
+                            names_to = "Variable", values_to = "NPDC")
+
+variables <- unique(npdcm_long$Variable)
+plots <- list()
+
+for (i in seq_along(variables)) {
+  plots[[i]] <- ggplot(data = npdcm_long %>% filter(Variable == variables[i]), aes(x = Date, y = NPDC)) +
+    geom_line(linewidth = 0.1, color = "black") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    scale_color_manual(values = rep("solid", length(variables))) +
+    labs(y = "Net Connectedness", title = variables[i]) +
+    theme_bw(base_size = 20) + 
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7),
+      axis.title.y = element_text(size = 7),
+      axis.text = element_text(size = 10),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+n_cols <- ceiling(sqrt(length(variables)))
+n_rows <- ceiling(length(variables) / n_cols)
+
+combined_plot <- wrap_plots(plots, ncol = n_cols) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+
+combined_plot
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/npdcm.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+
+### PCI
+
+```{r}
+PCIm <- PCI %>%
+  group_by(Date = floor_date(Date, "month")) %>%
+  summarise(
+    'Stocks-Commodities' = mean(`Stocks-Commodities`, na.rm = TRUE),
+    'Stocks-Bonds' = mean(`Stocks-Bonds`, na.rm=TRUE),
+    'Stocks-FOREX' = mean(`Stocks-FOREX`, na.rm=TRUE),
+    'Commodities-Bonds' = mean(`Commodities-Bonds`, na.rm=TRUE),
+    'Commodities-FOREX' = mean(`Commodities-FOREX`, na.rm=TRUE),
+    'Bonds-FOREX' = mean(`Bonds-FOREX`, na.rm=TRUE)
+  ) %>%
+  ungroup()
+```
+
+
+#### Plotting Monthly
+```{r}
+pcim_long <- pivot_longer(PCIm, cols = c('Stocks-Commodities', 'Stocks-Bonds', 'Stocks-FOREX', 'Commodities-Bonds', 'Commodities-FOREX', 'Bonds-FOREX'), 
+                            names_to = "Variable", values_to = "PCI")
+
+variables <- unique(pcim_long$Variable)
+plots <- list()
+
+for (i in seq_along(variables)) {
+  plots[[i]] <- ggplot(data = pcim_long %>% filter(Variable == variables[i]), aes(x = Date, y = PCI)) +
+    geom_line(linewidth = 0.1, color = "black") +
+    scale_color_manual(values = rep("solid", length(variables))) +
+    labs(y = "Net Connectedness", title = variables[i]) +
+    theme_bw(base_size = 20) + 
+    theme(
+      text = element_text(family = "Times New Roman"),
+      plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+      axis.title.x = element_text(size = 7),
+      axis.title.y = element_text(size = 7),
+      axis.text = element_text(size = 10),
+      legend.position = "none",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.ticks = element_line(color = 'black')
+    )
+}
+
+n_cols <- ceiling(sqrt(length(variables)))
+n_rows <- ceiling(length(variables) / n_cols)
+
+combined_plot <- wrap_plots(plots, ncol = n_cols) +
+  plot_annotation(theme = theme(plot.title = element_text(hjust = 0.5, size = 15, face = "bold", family = "Times New Roman")))
+combined_plot
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/PCIm.png", plot = combined_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+## Explanatory Variables
+
+```{r}
+#reading the explanatory variable excel file
+EXP <- read_excel("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Explanatory/explanatory.xlsx")
+# exclude iMAPPtight and iMAPPloose (these are variable that were used solely to create other variables)
+EXP <- EXP[, !(names(EXP) %in% c('iMAPPtight', 'iMAPPloose', 'HEALTHCARE', 'ENTITLEMENT PROGRAMS', 'MACROPRUDENTIALTOTAL', 'MACROPRUDENTIAL', 'RESERVES', 'RESERVES-TO-ASSETS'))]
+#EXP$Date <- as.Date(EXP$Date)
+#cut <- as.Date("2002-08-01")
+#EXP <- EXP[EXP$Date >= cut, ]
+```
+
+```{r}
+colnames(EXP)
+```
+
+
+
+### Summary statistics
+
+```{r}
+    EXP$CONSUMERSENT_diff <- c(NA, diff(EXP$CONSUMERSENT))
+    EXP$`M2-TO-RESERVES_diff` <- c(NA, diff(EXP$`M2-TO-RESERVES`))
+    EXP$`10-2SPREAD_diff` <- c(NA, diff(EXP$`10-2SPREAD`))
+    EXP$OIL_diff <- c(NA, diff(EXP$OIL))
+```
+
+
+```{r}
+compute_summary <- function(data_column) {
+    data_clean <- na.omit(data_column)
+    num_obs <- length(data_clean)
+    mean_val <- mean(data_clean)
+    sd_val <- sd(data_clean)
+    min_val <- min(data_clean)
+    max_val <- max(data_clean)
+    skew_val <- skewness(data_clean)
+    kurt_val <- kurtosis(data_clean)
+    
+    return(c(num_obs, mean_val, sd_val, min_val, max_val, skew_val, kurt_val))
+}
+```
+
+
+```{r}
+relevant_columns <- colnames(EXP)[2:length(colnames(EXP))]
+summaries <- t(sapply(relevant_columns, function(col) compute_summary(EXP[[col]])))
+summaries_df <- as.data.frame(summaries)
+colnames(summaries_df) <- c("N", "Mean", "StdDev", "Min", "Max", "Skewness", "Kurtosis")
+```
+
+```{r}
+stargazer(summaries_df, type = "latex", summary = FALSE)
+```
+### ADF tests
+
+```{r}
+perform_adf_tests_forecast <- function(column_data) {
+    data_clean <- na.omit(column_data)
+
+    adf_none <- ur.df(data_clean, type = "none")
+    adf_none_stat <- adf_none@teststat[1]
+    
+    adf_drift <- ur.df(data_clean, type = "drift")
+    adf_drift_stat <- adf_drift@teststat[1]
+
+    adf_trend <- ur.df(data_clean, type = "trend")
+    adf_trend_stat <- adf_trend@teststat[1]
+
+    adf_none_p <- pnorm(-abs(adf_none_stat))
+    adf_drift_p <- pnorm(-abs(adf_drift_stat))
+    adf_trend_p <- pnorm(-abs(adf_trend_stat))
+
+    return(c(adf_none_stat, adf_none_p, adf_drift_stat, adf_drift_p, adf_trend_stat, adf_trend_p))
+}
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(EXP)[sapply(EXP, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(EXP[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results for All Variables",
+          rownames = FALSE,
+          digits = 4)
+
+```
+
+
+
+
+```{r}
+tci_col <- TCIm %>% dplyr::select(TCI)
+pcim_cols <- PCIm %>% dplyr::select(
+    `Stocks-Commodities`,
+    `Stocks-Bonds`,
+    `Stocks-FOREX`,
+    `Commodities-Bonds`,
+    `Commodities-FOREX`,
+    `Bonds-FOREX`
+)
+
+dep <- cbind(tci_col, pcim_cols)
+```
+
+```{r}
+adf_results <- data.frame(
+    Variable = character(),
+    ADF_None_Stat = numeric(),
+    ADF_None_P = numeric(),
+    ADF_Drift_Stat = numeric(),
+    ADF_Drift_P = numeric(),
+    ADF_Trend_Stat = numeric(),
+    ADF_Trend_P = numeric(),
+    stringsAsFactors = FALSE
+)
+
+numeric_columns <- names(dep)[sapply(dep, is.numeric)]
+
+for (col in numeric_columns) {
+    results <- perform_adf_tests_forecast(dep[[col]])
+    adf_results <- rbind(adf_results, c(col, results))
+}
+
+adf_results[, -1] <- lapply(adf_results[, -1], as.numeric)
+
+colnames(adf_results) <- c("Variable", "ADF_None_Stat", "ADF_None_P", "ADF_Drift_Stat", "ADF_Drift_P", "ADF_Trend_Stat", "ADF_Trend_P")
+
+stargazer(adf_results, type = "latex", summary = FALSE,
+          title = "ADF Test Results for dependent Variables",
+          rownames = FALSE,
+          digits = 4)
+```
+
+
+### correlation
+
+```{r}
+EXPcor <- cor(EXP[,-1], use = "complete.obs")
+```
+
+```{r}
+EXPcor_long <- reshape2::melt(EXPcor)
+```
+
+
+```{r}
+EXPcor <- cor(EXP[,-1], use = "complete.obs")
+```
+
+```{r}
+heatmap <- ggplot(EXPcor_long, aes(Var1, Var2, fill = value)) +
+  geom_tile() +  # Add the tiles
+  geom_text(aes(label = sprintf("%.2f", value)), size = 2.5, color = "black", family = "Times New Roman") + 
+  scale_fill_gradient2(low = "white", high = "red", mid = "yellow", midpoint = 0, limit = c(-1,1), space = "Lab", name="Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, family = "Times New Roman"),
+        axis.text.y = element_text(family = "Times New Roman"),
+        axis.title.x = element_blank(), 
+        axis.title.y = element_blank(),
+        plot.title = element_text(family = "Times New Roman", face = "bold", size = 14, hjust = 0.5)) + 
+  labs(fill = "Correlation") 
+
+print(heatmap)
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/heatmap.png", heatmap, width = 10, height = 8, dpi = 300)
+```
+
+
+```{r}
+high_cor_pairs <- subset(EXPcor_long, abs(value) > 0.65 & Var1 != Var2)
+high_cor_pairs$pair_id <- apply(high_cor_pairs[, c("Var1", "Var2")], 1, function(x) paste(sort(x), collapse = "-"))
+high_cor_pairs <- high_cor_pairs[!duplicated(high_cor_pairs$pair_id), ]
+high_cor_pairs$pair_id <- NULL
+high_cor_pairs$formatted <- with(high_cor_pairs, paste(Var1, "-", Var2, " (", sprintf("%.2f", value), ")", sep=""))
+print(high_cor_pairs$formatted)
+```
+
+
+### Merging Dataframes
+
+```{r}
+#Merging Dataframes
+#TCI
+TCIm <- merge(TCIm, EXP, by = "Date")
+#TO
+TOm <- merge(TOm, EXP, by = "Date")
+#FROM
+FROMm <- merge(FROMm, EXP, by = "Date")
+#NPDC
+NPDCm <- merge(NPDCm, EXP, by = "Date")
+#PCI
+PCIm <- merge(PCIm, EXP, by = "Date")
+```
+
+## PCA Variable Checking
+### Financial Stress Variables
+FSTRESS, FREDSTRESS, FINANCIAL CONDITITIONS, 10-2SPREAD_diff, RECESSION, RECESSIONPROB
+
+```{r}
+fstresspcadf <- TCIm[!is.na(TCIm$FSTRESS), ]
+pca_financialstress <- prcomp(fstresspcadf[, c("FSTRESS", "FREDSTRESS", "FINANCIALCONDITIONS", "10-2SPREAD_diff", "RECESSION", "RECESSIONPROB")], scale. = TRUE)
+
+explained_var_fstress <- summary(pca_financialstress)
+print(explained_var_fstress)
+fstresspcaplot <- fviz_eig(pca_financialstress)
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/fstresspca.png",plot = fstresspcaplot)
+```
+
+### Uncertainty Variables
+EPU, MONETARY, FISCAL, TAXES, GOVERNMENTSPEND, NATIONALSECURITY, ENTITLEMENTPROGRAMS, REGULATION, FINANCIALREGULATION, TRADEPOLICY, SOVEREIGNDEBT, DEBTCEILING, GOVERNMENT SHUTDOWN
+
+
+```{r}
+uncertaintypcadf <- TCIm[!is.na(TCIm$GOVERNMENTSHUTDOWN), ]
+pca_uncertainty <- prcomp(uncertaintypcadf[, c("EPU", "MONETARY", "FISCAL", "TAXES", "GOVERNMENTSPEND", "NATIONALSECURITY", "ENTITLEMENTPROGRAMS", "REGULATION", "FINANCIALREGULATION", "TRADEPOLICY", "SOVEREIGNDEBT", "DEBTCEILING", "GOVERNMENTSHUTDOWN")], scale. = TRUE)
+
+explained_var_uncertainty <- summary(pca_uncertainty)
+print(explained_var_uncertainty)
+uncertaintypcaplot <- fviz_eig(pca_uncertainty)
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/uncertaintyspca.png",plot = uncertaintypcaplot)
+```
+
+
+### equity market turbulence
+VIX, EMVOLATILITY
+```{r}
+equitypcadf <- TCIm[!is.na(TCIm$EMVOLATILITY), ]
+pca_equity <- prcomp(equitypcadf[, c("VIX", "EMVOLATILITY")], scale. = TRUE)
+
+explained_var_equity <- summary(pca_equity)
+print(explained_var_equity)
+equitymarketpcaplot <- fviz_eig(pca_equity)
+
+
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/equitypcaplot.png",plot = equitymarketpcaplot)
+```
+
+
+
+
+
+
+
+
+
+### Bayes information criterion for lag length for inclusion as explanatory variable
+```{r}
+bic_values <- numeric()
+max_lag <- 10
+for (lag_length in 1:max_lag) {
+    TCIm$TCI_lag <- lag(TCIm$TCI, lag_length)
+    
+    model <- lm(TCI ~ TCI_lag + EPU + EMVOLATILITY + TRADEPOLICY + `TB-FEDFUNDS` + CONSUMERSENT + RECESSIONPROB + OIL_diff + `M2-TO-RESERVES_diff` + FREDSTRESS + CONSUMERSENT, data = TCIm)
+    
+    bic_values[lag_length] <- BIC(model)
+}
+
+optimal_lag <- which.min(bic_values)
+print(paste("Optimal lag length:", optimal_lag))
+plot(1:max_lag, bic_values, type = "b", xlab = "Number of Lags", ylab = "BIC", main = "BIC for Lag Length Selection")
+```
+
+
+
+```{r}
+TCIm$TCI_lag1 <- lag(TCIm$TCI, 1)
+TCIm$TCI_lag2 <- lag(TCIm$TCI, 2)
+TCIm$TCI_firstdiff <- c(NA, diff(TCIm$TCI))
+TCIm$TCI_firstdifflag1 <- lag(TCIm$TCI_firstdiff, 1)
+TCIm$TCI_firstdifflag2 <- lag(TCIm$TCI_firstdiff, 2)
+TCI_firstdiff_no_na <- na.omit(TCIm$TCI_firstdiff)
+
+
+variable_names <- c("TCI", "TCI_firstdiff", "EPU", "MONETARY", "FISCAL", "TAXES", "GOVERNMENTSPEND", 
+                    "NATIONALSECURITY", "ENTITLEMENTPROGRAMS", "REGULATION", "FINANCIALREGULATION",
+                    "TRADEPOLICY", "SOVEREIGNDEBT", "DEBTCEILING", "GOVERNMENTSHUTDOWN", 
+                    "TB-FEDFUNDS", "RECESSION", "FREDSTRESS", 
+                    "VIX", "CONSUMERSENT", "EMVOLATILITY", "RECESSIONPROB", "OIL", 
+                    "M2-TO-RESERVES", "10-2SPREAD", "FINANCIALCONDITIONS", "MACROPRUDENTIALATTITUDE", 
+                    "FSTRESS")
+
+adf_results <- data.frame(variable = character(), p_value = numeric(), stringsAsFactors = FALSE)
+for (var_name in variable_names) {
+  variable <- na.omit(TCIm[[var_name]])
+    adf_test_result <- adf.test(variable, alternative = "stationary")
+    adf_results <- rbind(adf_results, data.frame(variable = var_name, p_value = adf_test_result$p.value))
+}
+
+print(adf_results)
+```
+
+## TCI
+```{r}
+adf_TCI <- adf.test(TCIm$TCI, alternative = "stationary")
+adf_TCI
+```
+
+
+
+
+
+### Regress on all (ta)
+```{r}
+modelTCIall <- lm(TCI ~ EPU  + MONETARY + FISCAL + TAXES + GOVERNMENTSPEND + NATIONALSECURITY + ENTITLEMENTPROGRAMS + REGULATION + FINANCIALREGULATION + TRADEPOLICY + SOVEREIGNDEBT + DEBTCEILING + GOVERNMENTSHUTDOWN + `TB-FEDFUNDS` + VIX + RECESSION + FREDSTRESS + VIX + CONSUMERSENT + EMVOLATILITY + RECESSIONPROB + OIL_diff + `M2-TO-RESERVES_diff` + `10-2SPREAD_diff`+ FINANCIALCONDITIONS + MACROPRUDENTIALATTITUDE + FSTRESS, data = TCIm)
+residuals <- residuals(modelTCIall)
+summary(modelTCIall)
+```
+```{r}
+optimal_lag <- 10
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+
+### Variance Inflation factor
+```{r}
+vif_values <- vif(modelTCIall)
+print(vif_values)
+```
+
+
+### adding decimalised TCI for logit regression
+```{r}
+TCIm$TCIdec <- TCIm$TCI / 100
+#TCIm_with_pca$TCIdec <- TCIm_with_pca$TCI / 100
+```
+
+
+### fractional logit
+```{r}
+modelTCI1_fractional <- glm(TCIdec ~ EPU  + FINANCIALREGULATION + SOVEREIGNDEBT + VIX + TRADEPOLICY + CONSUMERSENT + RECESSIONPROB + OIL_diff + `M2-TO-RESERVES_diff` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, 
+                            data = TCIm, family = quasibinomial)
+
+summary(modelTCI1_fractional)
+```
+### ADF test
+```{r}
+adf_TCI <- adf.test(TCIm$TCI, alternative = "stationary")
+adf_TCI
+```
+```{r}
+adf_StocksCommodities <- adf.test(PCIm$`Stocks-Commodities`, alternative = "stationary")
+adf_StocksCommodities
+```
+
+
+### Model 1 TCI STANDARD VARIATION 1
+```{r}
+t1 <- lm(TCI ~ EPU  + FINANCIALREGULATION + SOVEREIGNDEBT + VIX + TRADEPOLICY + CONSUMERSENT_diff + RECESSIONPROB + OIL_diff + `M2-TO-RESERVES_diff` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, data = TCIm)
+residuals <- residuals(t1)
+summary(t1)
+```
+
+
+
+```{r}
+residuals <- residuals(t1)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+```{r}
+model1_data <- data.frame(
+  Fitted = fitted(t1),
+  Residuals = residuals(t1)
+)
+
+residuals_plot <- ggplot(model1_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/t1residuals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+#### Granger Test
+```{r}
+grangertest(TCIm$RECESSIONPROB, TCIm$TCI, order = 1)
+grangertest
+```
+
+
+```{r}
+plot(t1, which = 1)
+```
+
+```{r}
+model1_data <- data.frame(
+  Fitted = fitted(t1),
+  Residuals = residuals(t1)
+)
+
+residuals_plot <- ggplot(model1_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/TC1residuals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+
+### Model 2 TCI with lag and TB-FEDFUNDS instead of M2-Reserves ratio
+
+
+```{r}
+t2 <- lm(TCI ~ TCI_lag1 + EPU  + FINANCIALREGULATION + SOVEREIGNDEBT + VIX + TRADEPOLICY + CONSUMERSENT_diff + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, data = TCIm)
+residuals <- residuals(t2)
+summary(t2)
+```
+
+```{r}
+residuals <- residuals(t2)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+```{r}
+model2_data <- data.frame(
+  Fitted = fitted(t2),
+  Residuals = residuals(t2)
+)
+
+residuals_plot <- ggplot(model2_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/t2residuals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+### Model 3 TCI standard with first differenced
+
+```{r}
+t3 <- lm(TCI_firstdiff ~ TCI_firstdifflag1 + EPU  + FINANCIALREGULATION + SOVEREIGNDEBT + VIX + TRADEPOLICY + CONSUMERSENT_diff + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, data = TCIm)
+summary(t3)
+```
+
+```{r}
+residuals <- residuals(t3)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+```{r}
+model3_data <- data.frame(
+  Fitted = fitted(t3),
+  Residuals = residuals(t3)
+)
+
+residuals_plot <- ggplot(model3_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/t3residuals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+
+### Model 4 including PCA variables
+
+
+
+#### Regress with PCA
+
+```{r}
+TCIm_with_pca <- TCIm
+PCIm_with_pca <- PCIm
+
+# financial stress
+principal_components_fstress <- predict(pca_financialstress, fstresspcadf[, c("FSTRESS", "FREDSTRESS", "FINANCIALCONDITIONS", "10-2SPREAD_diff", "RECESSION", "RECESSIONPROB")])
+
+replacement <- data.frame(PCfstress1 = rep(NA, nrow(TCIm_with_pca)))
+replacement[1:length(principal_components_fstress[, 1]), "PCfstress1"] <- principal_components_fstress[, 1]
+TCIm_with_pca$PCfstress1 <- replacement$PCfstress1
+#TCIm_with_pca$PCfstress1 <- principal_components_fstress[, 1]
+PCIm_with_pca$PCfstress1 <- replacement$PCfstress1
+#PCIm_with_pca$PCfstress1 <- principal_components_fstress[, 1]
+#to include the second principal component
+#TCIm_with_pca$PCfstress2 <- principal_components_fstress[, 2]
+#PCIm_with_pca$PCfstress1 <- principal_components_fstress[, 2]
+```
+
+```{r}
+# Uncertainty
+principal_components_uncertainty <- predict(pca_uncertainty, uncertaintypcadf[, c("EPU", "MONETARY", "FISCAL", "TAXES", "GOVERNMENTSPEND", "NATIONALSECURITY", "ENTITLEMENTPROGRAMS", "REGULATION", "FINANCIALREGULATION", "TRADEPOLICY", "SOVEREIGNDEBT", "DEBTCEILING", "GOVERNMENTSHUTDOWN")])
+
+replacement_uncertainty <- data.frame(PCuncertainty1 = rep(NA, nrow(TCIm_with_pca)))
+replacement_uncertainty[1:length(principal_components_uncertainty[, 1]), "PCuncertainty1"] <- principal_components_uncertainty[, 1]
+
+TCIm_with_pca$PCuncertainty1 <- replacement_uncertainty$PCuncertainty1
+PCIm_with_pca$PCuncertainty1 <- replacement_uncertainty$PCuncertainty1
+```
+
+```{r}
+# Equity
+principal_components_equity <- predict(pca_equity, equitypcadf[, c("VIX", "EMVOLATILITY")])
+
+replacement_equity1 <- data.frame(PCequity1 = rep(NA, nrow(TCIm_with_pca)))
+replacement_equity2 <- data.frame(PCequity2 = rep(NA, nrow(TCIm_with_pca)))
+
+replacement_equity1[1:length(principal_components_equity[, 1]), "PCequity1"] <- principal_components_equity[, 1]
+replacement_equity2[1:length(principal_components_equity[, 2]), "PCequity2"] <- principal_components_equity[, 2]
+
+TCIm_with_pca$PCequity1 <- replacement_equity1$PCequity1
+PCIm_with_pca$PCequity1 <- replacement_equity1$PCequity1
+TCIm_with_pca$PCequity2 <- replacement_equity2$PCequity2
+PCIm_with_pca$PCequity2 <- replacement_equity2$PCequity2
+```
+
+
+```{r}
+t4 <- lm(TCI ~ TCI_lag1 + PCuncertainty1 + PCfstress1 + PCequity1 + PCequity2 + `TB-FEDFUNDS` + CONSUMERSENT_diff + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE, data = TCIm_with_pca)
+summary(t4)
+```
+
+```{r}
+model4_data <- data.frame(
+  Fitted = fitted(t4),
+  Residuals = residuals(t4)
+)
+
+residuals_plot <- ggplot(model4_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/t4residuals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+## Experimental regressions: logit,
+
+
+### Model 5 betareg
+```{r}
+TCIm$TCIdec_lag1 <- lag(TCIm$TCIdec, 1)
+
+t5 <- betareg(TCIdec ~ TCIdec_lag1 + EPU  + FINANCIALREGULATION + SOVEREIGNDEBT + VIX + TRADEPOLICY + CONSUMERSENT_diff + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, link = "logit", data = TCIm)
+
+summary(t5)
+```
+```{r}
+model5_data <- data.frame(
+  Fitted = fitted(t5),
+  Residuals = residuals(t5)
+)
+
+residuals_plot <- ggplot(model1_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/t5.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+### Model 6 fractional logit
+```{r}
+t6 <- glm(TCIdec ~ TCIdec_lag1 + EPU  + FINANCIALREGULATION + SOVEREIGNDEBT + VIX + TRADEPOLICY + CONSUMERSENT_diff + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, 
+                            data = TCIm, family = quasibinomial)
+
+summary(t6)
+```
+
+```{r}
+model5_data <- data.frame(
+  Fitted = fitted(t5),
+  Residuals = residuals(t5)
+)
+
+residuals_plot <- ggplot(model5_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/t6residuals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+## TO, FROM, NPDC Regressions
+may not include TO or FROM regressions
+may not include TO or FROM regressions. I think it is more productive to just include overall connectedness for the variable couples.
+may not include NPDC because I thinkt the results are weak and i'll have far too many regressions to be doing directional 
+
+The investigation is not so much investigating directional spillovers in this part, or trying to explain why for a given period Stocks contribute to Bonds more than bonds contribute to stocks it is rather discussing contagion as a whole. For this reason, we use TCI for overall connectedness and PCI for the pariwise connectedness. 
+
+## PCI Regressions
+
+### adding lags
+
+```{r}
+PCIm$`Stocks-Commodities_lag1` <- lag(PCIm$`Stocks-Commodities`, 1)
+PCIm$`Stocks-Bonds_lag1` <- lag(PCIm$`Stocks-Bonds`, 1)
+PCIm$`Stocks-FOREX_lag1` <- lag(PCIm$`Stocks-FOREX`, 1)
+PCIm$`Commodities-Bonds_lag1` <- lag(PCIm$`Commodities-Bonds`, 1)
+PCIm$`Commodities-FOREX_lag1` <- lag(PCIm$`Commodities-FOREX`, 1)
+PCIm$`Bonds-FOREX_lag1` <- lag(PCIm$`Bonds-FOREX`, 1)
+```
+
+### Stocks-Commodities sc
+
+```{r}
+bic_values <- numeric()
+max_lag <- 10
+for (lag_length in 1:max_lag) {
+    PCIm$`Stocks-Commodities_lag` <- lag(PCIm$`Stocks-Commodities`, lag_length)
+    
+    lm(PCIm$`Stocks-Commodities` ~ EPU  + FINANCIALREGULATION + SOVEREIGNDEBT + VIX + TRADEPOLICY + CONSUMERSENT_diff + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, data = PCIm)
+    
+    bic_values[lag_length] <- BIC(model)
+}
+
+optimal_lag <- which.min(bic_values)
+print(paste("Optimal lag length:", optimal_lag))
+plot(1:max_lag, bic_values, type = "b", xlab = "Number of Lags", ylab = "BIC", main = "BIC for Lag Length Selection")
+```
+
+```{r}
+sc <- lm(PCIm$`Stocks-Commodities` ~ `Stocks-Commodities_lag1` + EPU  + FINANCIALREGULATION + SOVEREIGNDEBT + VIX + TRADEPOLICY + CONSUMERSENT_diff + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, data = PCIm)
+summary(sc)
+```
+```{r}
+modelsc_data <- data.frame(
+  Fitted = fitted(sc),
+  Residuals = residuals(sc)
+)
+
+residuals_plot <- ggplot(modelsc_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/scresiduals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+### Stocks-Bonds sb
+```{r}
+sb <- lm(PCIm$`Stocks-Bonds` ~ `Stocks-Bonds_lag1` + EPU  + FINANCIALREGULATION + DEBTCEILING + VIX + CONSUMERSENT_diff + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, data = PCIm)
+summary(sb)
+```
+```{r}
+modelsb_data <- data.frame(
+  Fitted = fitted(sb),
+  Residuals = residuals(sb)
+)
+
+residuals_plot <- ggplot(modelsb_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/sbresiduals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+### Stocks-FOREX sf
+```{r}
+sf <- lm(PCIm$`Stocks-FOREX` ~ `Stocks-FOREX_lag1` + EPU  + FINANCIALREGULATION + VIX + TRADEPOLICY + CONSUMERSENT_diff + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, data = PCIm)
+summary(sf)
+```
+```{r}
+modelsf_data <- data.frame(
+  Fitted = fitted(sf),
+  Residuals = residuals(sf)
+)
+
+residuals_plot <- ggplot(modelsf_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/sfresiduals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+
+### Commodities-Bonds cb
+```{r}
+cb <- lm(PCIm$`Commodities-Bonds` ~ `Commodities-Bonds_lag1` + EPU  + FINANCIALREGULATION + SOVEREIGNDEBT + VIX + TRADEPOLICY + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, data = PCIm)
+summary(cb)
+```
+
+```{r}
+modelcb_data <- data.frame(
+  Fitted = fitted(cb),
+  Residuals = residuals(cb)
+)
+
+residuals_plot <- ggplot(modelcb_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/cb.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+### Commodities-FOREX
+```{r}
+cf <- lm(PCIm$`Commodities-FOREX` ~ `Commodities-FOREX_lag1` + EPU  + FINANCIALREGULATION + SOVEREIGNDEBT + VIX + TRADEPOLICY + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, data = PCIm)
+summary(cf)
+```
+
+```{r}
+modelcf_data <- data.frame(
+  Fitted = fitted(cf),
+  Residuals = residuals(cf)
+)
+
+residuals_plot <- ggplot(modelcf_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/cfresiduals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+### Bonds-FOREX
+```{r}
+bf <- lm(PCIm$`Bonds-FOREX` ~ `Bonds-FOREX_lag1` + EPU  + FINANCIALREGULATION + DEBTCEILING + VIX + TRADEPOLICY + RECESSIONPROB + OIL_diff + `TB-FEDFUNDS` + MACROPRUDENTIALATTITUDE + FINANCIALCONDITIONS, data = PCIm)
+summary(bf)
+```
+```{r}
+modelbf_data <- data.frame(
+  Fitted = fitted(bf),
+  Residuals = residuals(bf)
+)
+
+residuals_plot <- ggplot(modelbf_data, aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", col = "blue", se = FALSE) +
+  theme_bw(base_size = 20) + 
+  labs(
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 12),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 10),
+    legend.position = "none",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.ticks = element_line(color = 'black')
+  )
+
+print(residuals_plot)
+ggsave("/Users/joelthomas/Library/CloudStorage/OneDrive-Personal/Documents/My Documents/UNIVERSITY/Masters/M2 Finance/Master Thesis/Data/US/Plots/bfresiduals.png", plot = residuals_plot, width = 15, height = 10, dpi = 300)
+```
+
+
+## Regression Output in one table
+
+```{r}
+stargazer(t1, t2, t3, t4, t5, t6,  type = "latex")
+```
+
+
+
+### PCI
+```{r}
+stargazer(sc, sb, sf, cb, cf, bf,  type = "latex")
+```
+
+
+
+
+
+
+```{r}
+residuals <- residuals(t4)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+```{r}
+residuals <- residuals(t5)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+```{r}
+residuals <- residuals(t6)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+```{r}
+residuals <- residuals(sc)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+```{r}
+residuals <- residuals(sb)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+```{r}
+residuals <- residuals(sf)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+```{r}
+residuals <- residuals(cb)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+```{r}
+residuals <- residuals(cf)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
+
+
+```{r}
+residuals <- residuals(bf)
+ljung_box_test <- Box.test(residuals, lag = optimal_lag, type = "Ljung-Box")
+print(ljung_box_test)
+```
