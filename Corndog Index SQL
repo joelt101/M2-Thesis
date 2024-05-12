@@ -1,0 +1,38 @@
+-- Corndog Index Query
+#standardSQL
+WITH RelevantInteractions AS (
+  SELECT
+    PARSE_DATE('%Y%m%d', CAST(SQLDATE AS STRING)) AS EventDate,
+    CASE
+      WHEN Actor1CountryCode = 'USA' AND Actor2CountryCode IN ('AUS', 'FRA', 'DEU', 'JPN', 'MEX', 'GBR') THEN Actor2CountryCode
+      WHEN Actor2CountryCode = 'USA' AND Actor1CountryCode IN ('AUS', 'FRA', 'DEU', 'JPN', 'MEX', 'GBR') THEN Actor1CountryCode
+      ELSE NULL
+    END AS PartnerCountry,
+    EventCode,
+    IF(EventCode IN ('014', '0211', '061', '022', '0254', '031', '0311', '032', '0354', '036', '042', '043', '044', '046', '050', '057', '085', '013', '0231', '030', '0331', '0351', '0355', '037', '040', '041', '070', '071', '081', '086', '1011', '102', '1031', '1051', '106', '107'), 'Cooperation',
+       IF(EventCode IN ('160', '161', '1621', '163', '164', '172', '191', '110', '111', '120', '121', '1211', '122', '1221', '1241', '1244', '1245', '125', '127', '128', '129', '1312', '1313', '132', '1321', '134', '136', '139', '162'), 'Uncooperation', 'Neutral')) AS InteractionType,
+    ABS(GoldsteinScale) AS Weight
+  FROM
+    `gdelt-bq.full.events`
+  WHERE
+    PARSE_DATE('%Y%m%d', CAST(SQLDATE AS STRING)) BETWEEN DATE('2000-01-01') AND CURRENT_DATE()
+    AND (
+      (Actor1CountryCode = 'USA' AND Actor2CountryCode IN ('AUS', 'FRA', 'DEU', 'JPN', 'MEX', 'GBR')) OR
+      (Actor2CountryCode = 'USA' AND Actor1CountryCode IN ('AUS', 'FRA', 'DEU', 'JPN', 'MEX', 'GBR'))
+    )
+)
+
+SELECT
+  EventDate,
+  PartnerCountry,
+  SUM(CASE WHEN InteractionType = 'Cooperation' THEN Weight ELSE 0 END) AS CooperationImpact,
+  SUM(CASE WHEN InteractionType = 'Uncooperation' THEN Weight ELSE 0 END) AS UncooperationImpact,
+  (SUM(CASE WHEN InteractionType = 'Cooperation' THEN Weight ELSE 0 END) - SUM(CASE WHEN InteractionType = 'Uncooperation' THEN Weight ELSE 0 END)) / NULLIF(SUM(CASE WHEN InteractionType IN ('Cooperation', 'Uncooperation') THEN Weight ELSE 0 END), 0) AS CooperationIndex
+FROM
+  RelevantInteractions
+WHERE
+  PartnerCountry IS NOT NULL
+GROUP BY
+  EventDate, PartnerCountry
+ORDER BY
+  EventDate, PartnerCountry
